@@ -18,8 +18,7 @@ updating the containers never deletes it.
    current `data/` folder is about 5 GB and grows with every upload.
 2. OS: **Ubuntu 24.04** (plain, or Hostinger's "Ubuntu with Docker" template).
 3. Note the VPS **IP address** and the **root password / SSH key**.
-4. In hPanel → VPS → **Firewall**: allow inbound **22, 80, 443** (TCP), and
-   **443 UDP** if offered.
+4. In hPanel → VPS → **Firewall**: allow inbound **22, 80, 443** (TCP).
 
 ## 2. Install Docker on the VPS
 
@@ -30,7 +29,7 @@ curl -fsSL https://get.docker.com | sh
 docker --version && docker compose version
 
 # OS firewall too (same ports as hPanel)
-ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp
+ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp
 ufw --force enable
 ```
 
@@ -84,6 +83,9 @@ cd /opt/bom-tool
 cp .env.example .env
 nano .env
 ```
+
+Keep the `COMPOSE_FILE=...` line as it is. It adds the HTTPS port 443
+(`docker-compose.https.yml`); the base `docker-compose.yml` opens only port 80.
 
 Set `SITE_ADDRESS`:
 
@@ -171,6 +173,32 @@ then with `scp root@<VPS-IP>:/opt/bom-backups/<file> .`.
 3. Rename `data/bom_tool.backup.db` to `data/bom_tool.db`.
 4. `chown -R 1000:1000 data`
 5. `docker compose up -d`
+
+## Running it on a Windows PC with Docker Desktop (testing)
+
+Don't point the app at the Windows `data/` folder under Docker Desktop. The
+SQLite database there goes through Docker Desktop's Windows file sharing,
+which can hang the whole app. Keep the data in a Docker volume instead.
+On the PC it runs over plain HTTP on port 80 only (no HTTPS, no certificate
+warning). In `.env` (without the `COMPOSE_FILE` line):
+
+```
+SITE_ADDRESS=http://localhost
+COOKIE_SECURE=false
+DATA_VOLUME=bom_data
+```
+
+Copy existing data into the volume once (PowerShell or Git Bash, in the project folder):
+
+```
+docker compose create
+tar -cf - -C data . | docker run -i --rm --user root -v bom-tool_bom_data:/dest --entrypoint sh bom-tool-app -c "tar -xf - -C /dest && chown -R 1000:1000 /dest"
+docker compose up -d
+```
+
+Then open `http://localhost`. Data added from then on lives in the
+volume, not in the Windows `data/` folder. **Never set `DATA_VOLUME` on the VPS**:
+there, `./data` is on the server's own disk and works as-is.
 
 ## Notes
 

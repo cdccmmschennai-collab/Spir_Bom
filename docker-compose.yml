@@ -4,11 +4,14 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     volumes:
-      # Database, uploaded SPIRs, generated files and logs live on the host
-      # disk, so rebuilding or updating the container never loses them.
-      - ./data:/app/data
+      # Database, uploaded SPIRs, generated files and logs live outside the
+      # container, so rebuilding or updating it never loses them. Default:
+      # the ./data folder (right on a Linux server). On Docker Desktop for
+      # Windows set DATA_VOLUME=bom_data in .env instead -- a SQLite
+      # database in a shared Windows folder can hang the app.
+      - ${DATA_VOLUME:-./data}:/app/data
     # No ports published: only Caddy (below) can reach the app.
     expose:
       - "8001"
@@ -18,10 +21,10 @@ services:
     restart: unless-stopped
     depends_on:
       - app
+    # Port 80 only here. The HTTPS server adds 443 through
+    # docker-compose.https.yml (loaded via COMPOSE_FILE in its .env).
     ports:
       - "80:80"
-      - "443:443"
-      - "443:443/udp"
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?Set SITE_ADDRESS in .env (see .env.example)}
     volumes:
@@ -30,5 +33,6 @@ services:
       - caddy_config:/config
 
 volumes:
+  bom_data:       # used only when DATA_VOLUME=bom_data (Docker Desktop)
   caddy_data:
   caddy_config:
