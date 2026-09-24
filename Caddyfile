@@ -1,0 +1,6 @@
+# HTTPS reverse proxy for the BOM Tool. Caddy gets and renews the
+# certificate for SITE_ADDRESS (set in .env) automatically.
+{$SITE_ADDRESS} {
+	encode gzip
+	reverse_proxy app:8001
+}

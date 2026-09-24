@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/jpeg" href="/cdc-logo.jpg">
+<script src="/theme.js"></script>
+<title>Extraction &middot; SPIR-BOM Tool</title>
+<style>
+  :root {
+    --purple: #8a4a90;
+    --purple-dark: #753f7a;
+    --purple-light: #f3edf4;
+    --green: #16a34a;
+    --green-light: #f0fdf4;
+    --ink: #1f2430;
+    --gray-600: #6b7280;
+    --gray-400: #9ca3af;
+    --border: #e6e6ec;
+    --page-bg: #f7f7fb;
+    --card-bg: #ffffff;
+  }
+  :root[data-theme="dark"] {
+    --ink: #f1f0f3; --gray-600: #b7b3bd; --gray-400: #8b8794;
+    --border: #3a3540; --page-bg: #1c1a20; --card-bg: #2a2631;
+    --green-light: #17301f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--page-bg); color: var(--ink);
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  a { color: inherit; }
+  svg.icon { width: 18px; height: 18px; flex: none; }
+
+  /* ---------- top header (spans sidebar + main content) ---------- */
+  #topHeader {
+    height: 56px; flex: none; background: var(--card-bg); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; padding: 0 20px;
+  }
+  #topHeaderBrand { display: flex; align-items: center; gap: 10px; }
+  #topHeaderLogo {
+    width: 32px; height: 32px; border-radius: 8px; background: #fff;
+    display: flex; align-items: center; justify-content: center; flex: none;
+    overflow: hidden; border: 1px solid var(--border);
+  }
+  #topHeaderLogo img { width: 100%; height: 100%; object-fit: contain; }
+  #topHeaderBrand span { font-size: 15px; font-weight: 700; letter-spacing: .2px; }
+
+  /* ---------- app shell ---------- */
+  #shell { display: flex; flex: 1; min-height: 0; }
+
+  /* ---------- sidebar ---------- */
+  #sidebar {
+    width: 250px; flex: none; background: var(--card-bg); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 20px 14px;
+  }
+
+  nav#sideNav { display: flex; flex-direction: column; gap: 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 12px;
+    border-radius: 10px; font-size: 13.5px; font-weight: 500; color: var(--gray-600);
+    text-decoration: none; cursor: pointer; position: relative;
+  }
+  .nav-item:hover:not(.disabled) { background: rgba(138,74,144,.08); }
+  .nav-item.active { background: var(--purple-light); color: var(--purple-dark); font-weight: 600; }
+  .nav-item.active svg { color: var(--purple-dark); }
+  .nav-item.disabled { color: var(--gray-400); cursor: not-allowed; }
+  .nav-item svg { color: var(--gray-400); }
+  .nav-item.active svg, .nav-item:not(.disabled):hover svg { color: var(--purple-dark); }
+
+  /* ---------- main column ---------- */
+  #main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  #header {
+    height: 54px; flex: none; background: var(--card-bg); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; padding: 0 28px 0 24px;
+  }
+  #searchWrap {
+    display: flex; align-items: center; gap: 8px; background: var(--page-bg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; height: 32px;
+    width: 260px; max-width: 40vw;
+  }
+  #searchWrap svg { color: var(--gray-400); }
+  #searchWrap input {
+    border: none; background: transparent; outline: none; font-size: 13.5px;
+    width: 100%; color: var(--ink);
+  }
+  #searchWrap input::placeholder { color: var(--gray-400); }
+
+  #avatarWrap { position: relative; }
+  #avatarBtn {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--purple); color: #fff;
+    border: none; font-size: 12px; font-weight: 700; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; letter-spacing: .3px;
+  }
+  #avatarMenu {
+    display: none; position: absolute; right: 0; top: 42px; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px rgba(20,20,40,.08);
+    min-width: 190px; padding: 12px; z-index: 10;
+  }
+  #avatarMenu.open { display: block; }
+  #avatarMenu .who { font-size: 12px; color: var(--gray-600); margin-bottom: 10px; }
+  #avatarMenu .who b { color: var(--ink); }
+  #logoutBtn {
+    width: 100%; text-align: left; background: none; border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px; font-weight: 600;
+    color: var(--ink); cursor: pointer;
+  }
+  #logoutBtn:hover { background: var(--page-bg); }
+
+  /* ---------- content ---------- */
+  #content {
+    flex: 1; padding: 46px 24px 40px; display: flex; flex-direction: column; align-items: center;
+  }
+  #head {
+    width: 700px; max-width: calc(100% - 8px);
+    text-align: left;
+    margin-bottom: 24px;
+  }
+  #head h3 { font-size: 25px; font-weight: 700; margin: 0 0 6px; color: var(--ink); }
+  #head p { font-size: 13.5px; color: var(--gray-600); margin: 0; }
+
+  #uploadCard {
+    width: 700px; max-width: calc(100% - 8px); min-height: 320px; background: var(--card-bg);
+    border: 2px dashed var(--purple); border-radius: 16px; padding: 40px 28px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  #uploadCard:hover, #uploadCard.hover { border-color: var(--purple-dark); background: var(--purple-light); }
+  :root[data-theme="dark"] #uploadCard:hover, :root[data-theme="dark"] #uploadCard.hover { background: #352c3b; }
+  #uploadCard input { display: none; }
+  #uploadIcon {
+    width: 52px; height: 52px; border-radius: 14px; background: var(--purple-light);
+    display: flex; align-items: center; justify-content: center; margin-bottom: 18px;
+  }
+  #uploadIcon svg { width: 24px; height: 24px; color: var(--purple); }
+  #uploadCard h2 { font-size: 16px; font-weight: 600; color: var(--ink); margin: 0 0 6px; }
+  #uploadCard p.desc { font-size: 13.5px; color: var(--gray-600); margin: 0 0 4px; }
+  #uploadCard p.supports { font-size: 12px; color: var(--gray-400); margin: 0; }
+
+  #guideCard {
+    width: 700px; max-width: calc(100% - 8px); margin-top: 20px; background: var(--green-light);
+    border: 1px solid #d3f0da; border-radius: 14px; padding: 16px 20px;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  #guideCard svg { color: var(--green); flex: none; margin-top: 2px; }
+  #guideCard .title { font-size: 13px; font-weight: 700; color: #14532d; margin-bottom: 2px; }
+  #guideCard .text { font-size: 12.5px; color: #2f6b3f; line-height: 1.5; }
+  :root[data-theme="dark"] #guideCard { border-color: #234a2e; }
+  :root[data-theme="dark"] #guideCard .title { color: #a8dcb4; }
+  :root[data-theme="dark"] #guideCard .text { color: #8fc99c; }
+
+  #status { width: 700px; max-width: calc(100% - 8px); margin-top: 20px; }
+  .file-line {
+    display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 10px; margin-top: 8px; font-size: 13.5px;
+  }
+  .file-line a {
+    margin-left: auto; text-decoration: none; color: var(--purple-dark); font-weight: 600; font-size: 13px;
+  }
+  .spinner {
+    display: inline-block; width: 15px; height: 15px; border: 2px solid var(--border);
+    border-top-color: var(--purple); border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error { color: #c0362c; font-size: 13.5px; }
+  .meta { font-size: 12.5px; color: var(--gray-600); margin-bottom: 4px; }
+
+  @media (max-width: 900px) {
+    #sidebar { width: 68px; padding: 20px 10px; }
+    .nav-item span.label { display: none; }
+    .nav-item { justify-content: center; padding: 0; }
+    #searchWrap { width: 160px; }
+  }
+  @media (max-width: 560px) {
+    #searchWrap { display: none; }
+  }
+</style>
+</head>
+<body>
+  <header id="topHeader">
+    <div id="topHeaderBrand">
+      <div id="topHeaderLogo">
+        <img src="/cdc-logo.jpg" alt="CDC">
+      </div>
+      <h3>SPIR BOM TOOL</h3>
+    </div>
+    <div id="avatarWrap">
+          <button id="avatarBtn" type="button">&hellip;</button>
+          <div id="avatarMenu">
+            <div class="who">Signed in as <b id="whoName">&hellip;</b></div>
+            <button id="logoutBtn" type="button">Log out</button>
+          </div>
+    </div>
+  </header>
+  <div id="shell">
+    <aside id="sidebar">
+      <nav id="sideNav">
+        <a href="/extraction.html" class="nav-item active">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"/></svg>
+          <span class="label">Extraction</span>
+        </a>
+        <a href="/batch-extraction.html" class="nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18 8 4A2 2 0 0 1 22 7.94v8.12a2 2 0 0 1-1.17 1.76l-8 4a2 2 0 0 1-1.66 0l-8-4A2 2 0 0 1 2 16.06V7.94a2 2 0 0 1 1.17-1.76l8-4a2 2 0 0 1 1.66 0Z"/><path d="M2.32 6.16 12 11l9.68-4.84"/><path d="M12 22.76V11"/></svg>
+          <span class="label">Batch Extraction</span>
+        </a>
+        <a href="/extraction-history.html" class="nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
+          <span class="label">History</span>
+        </a>
+        <a href="/parts-master.html" class="nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span class="label">Parts Master</span>
+        </a>
+        <a href="/settings.html" class="nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+          <span class="label">Settings</span>
+        </a>
+      </nav>
+    </aside>
+
+    <div id="main">
+      
+
+      <div id="content">
+        <div id="head">
+          <h3>Extraction</h3>
+          <p>Upload a SPIR (.xlsx / .xlsm / .xlsb / .xltx / .xls). You'll get an Extraction file and an OUTPUT file.</p>
+        </div>
+        <div id="uploadCard">
+          <div id="uploadIcon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8"/><path d="m8 17 4-4 4 4"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+          </div>
+          <h2>SPIR Excel File Upload</h2>
+          <p class="desc">Drag and drop your SPIR Excel file here, or click to browse</p>
+          <p class="supports">Supports .xlsx, .xlsm, .xlsb, .xltx, .xls</p>
+          <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xlsb,.xltx,.xls">
+        </div>
+
+        <div id="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const drop = document.getElementById('uploadCard');
+    const input = document.getElementById('fileInput');
+    const status = document.getElementById('status');
+
+    drop.addEventListener('click', () => input.click());
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('hover'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('hover'));
+    drop.addEventListener('drop', e => {
+      e.preventDefault(); drop.classList.remove('hover');
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+    input.addEventListener('change', () => { if (input.files.length) handleFile(input.files[0]); });
+
+    function goToLogin() { window.location.href = '/login.html'; }
+
+    async function handleFile(file) {
+      status.innerHTML = `<div class="file-line"><span class="spinner"></span> Processing ${file.name}...</div>`;
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const res = await fetch('/api/process-extraction', { method: 'POST', body: form });
+        if (res.status === 401) return goToLogin();
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Processing failed');
+        render(data);
+      } catch (err) {
+        status.innerHTML = `<div class="file-line error">${err.message}</div>`;
+      }
+    }
+
+    function render(data) {
+      const dl = (fname, label) =>
+        `<div class="file-line">📄 ${label}<a href="/api/download/${data.job_id}/${fname}" download>Download</a></div>`;
+      status.innerHTML = `
+        <div class="meta">${data.spir_label ? `<b>${data.spir_label}</b> &middot; ` : ''}SPIR: <b>${data.spir_no}</b> &middot; Sheets: ${data.sheets.join(', ')} &middot; Tags: ${data.tags.length}</div>
+        ${dl(data.extraction_file, 'Extraction file')}
+        ${dl(data.output_file, 'OUTPUT (SAP) file')}
+        ${renderPartTable(data)}
+      `;
+    }
+
+    function renderPartTable(data) {
+      const rows = data.part_numbers || [];
+      if (!rows.length) return '';
+      const body = rows.map(r => `
+        <tr>
+          <td>${data.spir_label || ''}</td>
+          <td>${r.tag || ''}</td>
+          <td>${r.part_type === 'equipment' ? 'Equipment' : 'Spare'}</td>
+          <td>${r.part_number_display || ''}</td>
+          <td>${r.material_temp_number}</td>
+        </tr>`).join('');
+      return `
+        <div class="file-line" style="flex-direction: column; align-items: stretch; gap: 8px;">
+          <div style="font-weight: 600;">SPIR No. / Part Number / Material Temp Number</div>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
+              <thead>
+                <tr>
+                  <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">SPIR No.</th>
+                  <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Tag</th>
+                  <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Type</th>
+                  <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Part Number</th>
+                  <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Material Temp Number</th>
+                </tr>
+              </thead>
+              <tbody>${body}</tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    function initials(name) {
+      const parts = String(name || '').split(/[^a-zA-Z0-9]+/).filter(Boolean);
+      if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+      if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+      return '?';
+    }
+
+    async function loadUser() {
+      const res = await fetch('/api/me');
+      if (res.status === 401) return goToLogin();
+      const data = await res.json();
+      document.getElementById('avatarBtn').textContent = initials(data.username);
+      document.getElementById('whoName').textContent = data.username;
+    }
+
+    const avatarBtn = document.getElementById('avatarBtn');
+    const avatarMenu = document.getElementById('avatarMenu');
+    avatarBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      avatarMenu.classList.toggle('open');
+    });
+    document.addEventListener('click', () => avatarMenu.classList.remove('open'));
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await fetch('/api/logout', { method: 'POST' });
+      goToLogin();
+    });
+
+    loadUser();
+  </script>
+</body>
+</html>

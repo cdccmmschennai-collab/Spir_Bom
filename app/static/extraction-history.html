@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="/theme.js"></script>
+<link rel="icon" type="image/jpeg" href="/cdc-logo.jpg">
+<title>History &middot; SPIR-BOM Tool</title>
+<style>
+  :root {
+    --purple: #8a4a90;
+    --purple-dark: #753f7a;
+    --purple-light: #f3edf4;
+    --red: #dc2626;
+    --red-dark: #b91c1c;
+    --green: #16a34a;
+    --ink: #1f2430;
+    --gray-600: #6b7280;
+    --gray-400: #9ca3af;
+    --border: #e6e6ec;
+    --page-bg: #f7f7fb;
+    --card-bg: #ffffff;
+  }
+  :root[data-theme="dark"] {
+    --ink: #f1f0f3; --gray-600: #b7b3bd; --gray-400: #8b8794;
+    --border: #3a3540; --page-bg: #1c1a20; --card-bg: #2a2631;
+    --row-hover: #322d3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--page-bg); color: var(--ink);
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  a { color: inherit; }
+  svg.icon { width: 18px; height: 18px; flex: none; }
+
+  /* ---------- top header (spans sidebar + main content) ---------- */
+  #topHeader {
+    height: 56px; flex: none; background: var(--card-bg); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; padding: 0 20px;
+  }
+  #topHeaderBrand { display: flex; align-items: center; gap: 10px; }
+  #topHeaderLogo {
+    width: 32px; height: 32px; border-radius: 8px; background: #fff;
+    display: flex; align-items: center; justify-content: center; flex: none;
+    overflow: hidden; border: 1px solid var(--border);
+  }
+  #topHeaderLogo img { width: 100%; height: 100%; object-fit: contain; }
+  #topHeaderBrand span { font-size: 15px; font-weight: 700; letter-spacing: .2px; }
+
+  /* ---------- app shell ---------- */
+  #shell { display: flex; flex: 1; min-height: 0; }
+
+  /* ---------- sidebar ---------- */
+  #sidebar {
+    width: 250px; flex: none; background: var(--card-bg); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 20px 14px; 
+  }
+
+  nav#sideNav { display: flex; flex-direction: column; gap: 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 12px;
+    border-radius: 10px; font-size: 13.5px; font-weight: 500; color: var(--gray-600);
+    text-decoration: none; cursor: pointer; position: relative;
+  }
+  .nav-item:hover:not(.disabled) { background: rgba(138,74,144,.08); }
+  .nav-item.active { background: var(--purple-light); color: var(--purple-dark); font-weight: 600; }
+  .nav-item.active svg { color: var(--purple-dark); }
+  .nav-item.disabled { color: var(--gray-400); cursor: not-allowed; }
+  .nav-item svg { color: var(--gray-400); }
+  .nav-item.active svg, .nav-item:not(.disabled):hover svg { color: var(--purple-dark); }
+
+  /* ---------- main column ---------- */
+  #main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  #searchWrap {
+    display: flex; align-items: center; gap: 8px; background: var(--page-bg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; height: 32px;
+    width: 260px; max-width: 40vw;
+  }
+  #searchWrap svg { color: var(--gray-400); }
+  #searchWrap input {
+    border: none; background: transparent; outline: none; font-size: 13.5px;
+    width: 100%; color: var(--ink);
+  }
+  #searchWrap input::placeholder { color: var(--gray-400); }
+
+  #avatarWrap { position: relative; }
+  #avatarBtn {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--purple); color: #fff;
+    border: none; font-size: 12px; font-weight: 700; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; letter-spacing: .3px;
+  }
+  #avatarMenu {
+    display: none; position: absolute; right: 0; top: 42px; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px rgba(20,20,40,.08);
+    min-width: 190px; padding: 12px; z-index: 10;
+  }
+  #avatarMenu.open { display: block; }
+  #avatarMenu .who { font-size: 12px; color: var(--gray-600); margin-bottom: 10px; }
+  #avatarMenu .who b { color: var(--ink); }
+  #logoutBtn {
+    width: 100%; text-align: left; background: none; border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px; font-weight: 600;
+    color: var(--ink); cursor: pointer;
+  }
+  #logoutBtn:hover { background: var(--page-bg); }
+
+  /* ---------- content ---------- */
+  #content { flex: 1; padding: 34px 28px 40px; }
+
+  #historyContainer {
+    max-width: 960px; width: 100%; margin: 0 auto; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(20, 20, 40, .05); padding: 28px;
+  }
+
+  #pageHead {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 20px; flex-wrap: wrap; margin-bottom: 22px;
+  }
+  #pageHead h1 { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
+  #pageHead p { font-size: 13.5px; color: var(--gray-600); margin: 0; }
+
+  #actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .action-btn {
+    border: none; border-radius: 9px; padding: 10px 16px; font-size: 13px; font-weight: 600;
+    cursor: pointer; white-space: nowrap; transition: opacity .15s;
+  }
+  .action-btn:disabled { opacity: .45; cursor: not-allowed; }
+  #combineBtn { background: var(--purple); color: #fff; }
+  #combineBtn:not(:disabled):hover { background: var(--purple-dark); }
+  #deleteBtn { background: var(--red); color: #fff; }
+  #deleteBtn:not(:disabled):hover { background: var(--red-dark); }
+
+  #tableCard {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px;
+    overflow: hidden; margin-top: 8px;
+  }
+  #tableToolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+  }
+  #searchBox {
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+    width: 260px; max-width: 50vw; font-size: 13.5px; background: var(--page-bg);
+  }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 720px; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th {
+    color: var(--gray-600); font-weight: 600; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .03em; background: var(--page-bg);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--row-hover, #fafafe); }
+  tbody tr.selected { background: var(--purple-light); }
+  tbody tr.selected:hover { background: var(--purple-light); }
+  td.filename { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.spirno { max-width: 160px; white-space: normal; word-break: break-word; line-height: 1.4; }
+  td.checkbox-col, th.checkbox-col { width: 40px; }
+  input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--purple); cursor: pointer; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 8px; margin-right: 6px;
+    color: var(--purple-dark); background: var(--purple-light);
+    text-decoration: none; transition: background .15s;
+  }
+  .icon-btn:hover { background: var(--purple); color: #fff; }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.error { background: #fee2e2; color: #991b1b; }
+
+  #pagination {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    padding: 14px 18px; border-top: 1px solid var(--border);
+  }
+  #pageInfo { font-size: 13px; color: var(--gray-600); }
+  .page-btn {
+    border: 1px solid var(--border); background: var(--card-bg); color: var(--ink);
+    border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .page-btn:hover:not(:disabled) { background: var(--purple-light); border-color: var(--purple); color: var(--purple-dark); }
+  .page-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+  @media (max-width: 900px) {
+    #sidebar { width: 68px; padding: 20px 10px; }
+    .nav-item span.label { display: none; }
+    .nav-item { justify-content: center; padding: 0; }
+    #searchWrap { width: 160px; }
+  }
+  @media (max-width: 560px) {
+    #searchWrap { display: none; }
+    #content { padding: 24px 14px 32px; }
+    #historyContainer { padding: 18px; border-radius: 12px; }
+    #searchBox { width: 100%; max-width: none; }
+    #tableToolbar { flex-direction: column; align-items: stretch; gap: 10px; }
+  }
+</style>
+</head>
+<body>
+  <header id="topHeader">
+    <div id="topHeaderBrand">
+      <div id="topHeaderLogo">
+        <img src="/cdc-logo.jpg" alt="CDC">
+      </div>
+      <h3>SPIR BOM TOOL</h3>
+    </div>
+    <div id="avatarWrap">
+      <button id="avatarBtn" type="button">&hellip;</button>
+      <div id="avatarMenu">
+        <div class="who">Signed in as <b id="whoName">&hellip;</b></div>
+        <button id="logoutBtn" type="button">Log out</button>
+      </div>
+    </div>
+  </header>
+  <div id="shell">
+    <aside id="sidebar">
+      <nav id="sideNav">
+        <a href="/extraction.html" class="nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"/></svg>
+          <span class="label">Extraction</span>
+        </a>
+        <a href="/batch-extraction.html" class="nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18 8 4A2 2 0 0 1 22 7.94v8.12a2 2 0 0 1-1.17 1.76l-8 4a2 2 0 0 1-1.66 0l-8-4A2 2 0 0 1 2 16.06V7.94a2 2 0 0 1 1.17-1.76l8-4a2 2 0 0 1 1.66 0Z"/><path d="M2.32 6.16 12 11l9.68-4.84"/><path d="M12 22.76V11"/></svg>
+          <span class="label">Batch Extraction</span>
+        </a>
+        <a href="/extraction-history.html" class="nav-item active">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
+          <span class="label">History</span>
+        </a>
+        <a href="/parts-master.html" class="nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span class="label">Parts Master</span>
+        </a>
+        <a href="/settings.html" class="nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+          <span class="label">Settings</span>
+        </a>
+      </nav>
+    </aside>
+
+    <div id="main">
+      <div id="content">
+        <div id="historyContainer">
+          <div id="pageHead">
+            <div>
+              <h1>History</h1>
+              <p>Select files and combine them into one merged Excel</p>
+            </div>
+            <div id="actions">
+              <button id="combineBtn" class="action-btn" type="button" disabled>Combine 0 files &rarr; Download Excel</button>
+              <button id="deleteBtn" class="action-btn" type="button" disabled>Delete 0 selected</button>
+            </div>
+          </div>
+
+          <div id="tableCard">
+            <div id="tableToolbar">
+              <input id="searchBox" placeholder="Filter by SPIR number or filename...">
+            </div>
+            <div class="table-wrap">
+              <table id="historyTable">
+                <thead>
+                  <tr>
+                    <th class="checkbox-col"><input type="checkbox" id="selectAll"></th>
+                    <th>Filename</th>
+                    <th>SPIR No.</th>
+                    <th>Tags</th>
+                    <th>Date</th>
+                    <th>Files</th>
+                  </tr>
+                </thead>
+                <tbody id="historyBody"><tr><td colspan="6">Loading...</td></tr></tbody>
+              </table>
+            </div>
+            <div id="pagination">
+              <button id="prevPageBtn" class="page-btn" type="button">Prev</button>
+              <span id="pageInfo">Page 1 of 1</span>
+              <button id="nextPageBtn" class="page-btn" type="button">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const searchBox = document.getElementById('searchBox');
+    const selectAll = document.getElementById('selectAll');
+    const combineBtn = document.getElementById('combineBtn');
+    const deleteBtn = document.getElementById('deleteBtn');
+    const prevPageBtn = document.getElementById('prevPageBtn');
+    const nextPageBtn = document.getElementById('nextPageBtn');
+    const pageInfo = document.getElementById('pageInfo');
+    const selected = new Set();
+    let currentRows = [];
+    const PAGE_SIZE = 10;
+    let currentPage = 1;
+
+    searchBox.addEventListener('input', () => loadHistory(searchBox.value));
+    prevPageBtn.addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderPage(); } });
+    nextPageBtn.addEventListener('click', () => {
+      const totalPages = Math.max(1, Math.ceil(currentRows.length / PAGE_SIZE));
+      if (currentPage < totalPages) { currentPage++; renderPage(); }
+    });
+
+    function goToLogin() { window.location.href = '/login.html'; }
+
+    function updateActionButtons() {
+      const n = selected.size;
+      combineBtn.textContent = `Combine ${n} file${n === 1 ? '' : 's'} → Download Excel`;
+      deleteBtn.textContent = `Delete ${n} selected`;
+      combineBtn.disabled = n === 0;
+      deleteBtn.disabled = n === 0;
+    }
+
+    function toggleRow(jobId, checked) {
+      if (checked) selected.add(jobId); else selected.delete(jobId);
+      const tr = document.querySelector(`tr[data-job-id="${jobId}"]`);
+      if (tr) tr.classList.toggle('selected', checked);
+      // Only rows with a checkbox (status === 'ok') are selectable at all --
+      // a failed run's row is never in `selected`, so it must be excluded
+      // here too, or the master checkbox could never show as "all selected"
+      // whenever the list contains any failed job.
+      const selectable = currentRows.filter(r => r.status === 'ok');
+      selectAll.checked = selectable.length > 0 && selectable.every(r => selected.has(r.job_id));
+      updateActionButtons();
+    }
+
+    selectAll.addEventListener('change', () => {
+      // Capture the intended state ONCE -- toggleRow() below mutates
+      // selectAll.checked as it recomputes "are all rows selected", so
+      // reading selectAll.checked fresh on every loop iteration (instead
+      // of using a fixed target) turned "select all" into "select just
+      // the first row" the moment that recompute flipped it back early.
+      const target = selectAll.checked;
+      currentRows.forEach(r => {
+        if (r.status !== 'ok') return;
+        const cb = document.querySelector(`input[data-row-checkbox="${r.job_id}"]`);
+        if (cb) cb.checked = target;
+        toggleRow(r.job_id, target);
+      });
+    });
+
+    async function loadHistory(search) {
+      // No job_type filter here -- this page shows the OVERALL history
+      // across every page that processes a SPIR (Full tool, Extraction,
+      // Batch Extraction), not just one kind of job. limit=200 keeps this
+      // comfortably ahead of the 10-per-page client-side pagination below.
+      const url = '/api/history?limit=200' + (search ? `&search=${encodeURIComponent(search)}` : '');
+      const res = await fetch(url);
+      if (res.status === 401) return goToLogin();
+      const rows = await res.json();
+      currentRows = rows;
+      selected.clear();
+      selectAll.checked = false;
+      currentPage = 1;
+      updateActionButtons();
+      renderPage();
+    }
+
+    const extractionIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"/><path d="M9 13h6"/><path d="M9 17h6"/></svg>';
+    const outputIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>';
+
+    function renderPage() {
+      const body = document.getElementById('historyBody');
+      const totalPages = Math.max(1, Math.ceil(currentRows.length / PAGE_SIZE));
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      if (!currentRows.length) {
+        body.innerHTML = '<tr><td colspan="6">No files processed yet.</td></tr>';
+        pageInfo.textContent = 'Page 1 of 1';
+        prevPageBtn.disabled = true;
+        nextPageBtn.disabled = true;
+        return;
+      }
+
+      const start = (currentPage - 1) * PAGE_SIZE;
+      const pageRows = currentRows.slice(start, start + PAGE_SIZE);
+
+      body.innerHTML = pageRows.map(r => {
+        const when = new Date(r.created_at + 'Z').toLocaleString();
+        const files = r.status === 'ok'
+          ? `<a class="icon-btn" href="/api/download/${r.job_id}/${r.extraction_file}" title="Download Extraction file">${extractionIcon}</a>` +
+            (r.output_file ? `<a class="icon-btn" href="/api/download/${r.job_id}/${r.output_file}" title="Download OUTPUT file">${outputIcon}</a>` : '')
+          : '<span class="badge error">error</span>';
+        const isChecked = selected.has(r.job_id) ? ' checked' : '';
+        const checkbox = r.status === 'ok'
+          ? `<input type="checkbox" data-row-checkbox="${r.job_id}"${isChecked}>`
+          : `<input type="checkbox" disabled title="Not available for a failed run">`;
+        return `<tr data-job-id="${r.job_id}" class="${selected.has(r.job_id) ? 'selected' : ''}">
+          <td class="checkbox-col">${checkbox}</td>
+          <td class="filename" title="${r.original_filename || ''}">${r.original_filename || '&mdash;'}</td>
+          <td class="spirno">${r.spir_no || '&mdash;'}</td>
+          <td>${r.tags.length}</td>
+          <td>${when}</td>
+          <td>${files}</td>
+        </tr>`;
+      }).join('');
+
+      body.querySelectorAll('input[data-row-checkbox]').forEach(cb => {
+        cb.addEventListener('change', () => toggleRow(cb.getAttribute('data-row-checkbox'), cb.checked));
+      });
+
+      pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+      prevPageBtn.disabled = currentPage <= 1;
+      nextPageBtn.disabled = currentPage >= totalPages;
+    }
+
+    combineBtn.addEventListener('click', async () => {
+      if (!selected.size) return;
+      combineBtn.disabled = true;
+      const originalText = combineBtn.textContent;
+      combineBtn.textContent = 'Combining...';
+      try {
+        const res = await fetch('/api/jobs/combine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_ids: Array.from(selected) }),
+        });
+        if (res.status === 401) return goToLogin();
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'Combine failed.');
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Combined_Extraction_${selected.size}_files.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        updateActionButtons();
+      }
+    });
+
+    deleteBtn.addEventListener('click', async () => {
+      if (!selected.size) return;
+      if (!confirm(`Delete ${selected.size} selected file(s) and their history? This cannot be undone.`)) return;
+      deleteBtn.disabled = true;
+      try {
+        const res = await fetch('/api/jobs/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_ids: Array.from(selected) }),
+        });
+        if (res.status === 401) return goToLogin();
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'Delete failed.');
+        }
+        await loadHistory(searchBox.value);
+      } catch (err) {
+        alert(err.message);
+        updateActionButtons();
+      }
+    });
+
+    function initials(name) {
+      const parts = String(name || '').split(/[^a-zA-Z0-9]+/).filter(Boolean);
+      if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+      if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+      return '?';
+    }
+
+    async function loadUser() {
+      const res = await fetch('/api/me');
+      if (res.status === 401) return goToLogin();
+      const data = await res.json();
+      document.getElementById('avatarBtn').textContent = initials(data.username);
+      document.getElementById('whoName').textContent = data.username;
+    }
+
+    const avatarBtn = document.getElementById('avatarBtn');
+    const avatarMenu = document.getElementById('avatarMenu');
+    avatarBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      avatarMenu.classList.toggle('open');
+    });
+    document.addEventListener('click', () => avatarMenu.classList.remove('open'));
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await fetch('/api/logout', { method: 'POST' });
+      goToLogin();
+    });
+
+    loadUser();
+    loadHistory();
+  </script>
+</body>
+</html>

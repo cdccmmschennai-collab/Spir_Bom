@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/jpeg" href="/cdc-logo.jpg">
+<title>Sign in &middot; SPIR BOM Tool</title>
+<style>
+  :root {
+    --purple: #8a4a90;
+    --purple-dark: #753f7a;
+    --ink: #1f2430;
+    --gray-600: #6b7280;
+    --border: #e3e3e8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    position: relative;
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; margin: 0; padding: 24px;
+    color: #fff;
+    overflow-x: hidden;
+  }
+  /* Background photo on its own layer so it can be scaled with a smooth,
+     hardware-accelerated transform animation. */
+  body::before {
+    content: ''; position: fixed; inset: 0; z-index: -2;
+    background: url('/bom-log.png') center / cover no-repeat;
+    animation: loginBgZoom 18s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+  /* Dark overlay -- keeps white branding text and the card both readable
+     against a busy industrial photo. */
+  body::after {
+    content: ''; position: fixed; inset: 0; z-index: -1;
+    background: linear-gradient(180deg, rgba(8, 10, 20, .62), rgba(8, 10, 20, .72));
+  }
+  @keyframes loginBgZoom {
+    from { transform: scale(1); }
+    to { transform: scale(1.08); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body::before { animation: none; }
+  }
+
+  .login-wrap { width: 100%; max-width: 380px; display: flex; flex-direction: column; align-items: center; }
+
+  /* ---------- brand header, above the card ---------- */
+  .brand-header { text-align: center; margin-bottom: 26px; }
+  .brand-logo {
+    width: 60px; height: 60px; border-radius: 16px; background: #fff;
+    display: flex; align-items: center; justify-content: center; margin: 0 auto 14px;
+    overflow: hidden; box-shadow: 0 10px 28px rgba(0, 0, 0, .3);
+  }
+  .brand-logo img { width: 100%; height: 100%; object-fit: contain; padding: 8px; }
+  .brand-title { font-size: 25px; font-weight: 800; letter-spacing: .6px; margin: 0 0 6px; color: #fff; }
+  .brand-sub {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase;
+    color: rgba(255, 255, 255, .78); margin: 0;
+  }
+
+  /* ---------- login card ---------- */
+  .card {
+    width: 100%; max-width: 350px;
+    background: rgba(255, 255, 255, .97);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 16px;
+    padding: 30px 28px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .38);
+  }
+  .card h2 { font-size: 19px; font-weight: 700; margin: 0 0 4px; color: var(--ink); text-align: center; }
+  .card p.card-sub { font-size: 13px; color: var(--gray-600); margin: 0 0 24px; text-align: center; }
+
+  label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 6px; color: var(--ink); }
+  input[type="text"], input[type="password"] {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: 9px; font-size: 14px; margin-bottom: 16px; background: #fff; color: var(--ink);
+  }
+  input[type="text"]:focus, input[type="password"]:focus { outline: 2px solid var(--purple); outline-offset: 1px; }
+
+  .pw-wrap { position: relative; }
+  .pw-wrap input { padding-right: 42px; }
+  .pw-toggle {
+    position: absolute; right: 6px; top: 7px; width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; cursor: pointer; color: var(--gray-600); padding: 0;
+  }
+  .pw-toggle svg { width: 17px; height: 17px; }
+
+  .remember-row {
+    display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500;
+    color: var(--gray-600); margin-bottom: 22px; cursor: pointer;
+  }
+  .remember-row input { width: auto; margin: 0; accent-color: var(--purple); cursor: pointer; }
+
+  button[type="submit"] {
+    width: 100%; padding: 12px; border: none; border-radius: 9px;
+    background: var(--purple); color: #fff; font-size: 14.5px; font-weight: 700; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+  }
+  button[type="submit"]:hover:not(:disabled) { background: var(--purple-dark); }
+  button:disabled { opacity: .6; cursor: default; }
+
+  .error { color: #dc2626; font-size: 13px; margin-top: 14px; min-height: 16px; text-align: center; }
+
+  #firstLoginBox { display: none; }
+  #firstLoginBox p.warn { font-size: 13px; color: #92400e; margin: 0 0 12px; text-align: left; }
+  #newPassword {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 18px;
+    font-weight: 700; letter-spacing: .5px; text-align: center;
+    background: #f4f4f5; border: 1px dashed var(--gray-600); border-radius: 8px;
+    padding: 12px; margin-bottom: 16px; user-select: all; color: var(--ink);
+  }
+
+  /* ---------- footer ---------- */
+  .footer-links {
+    margin-top: 22px; display: flex; gap: 18px; flex-wrap: wrap; justify-content: center;
+  }
+  .footer-links span { font-size: 12px; color: rgba(255, 255, 255, .78); }
+
+  @media (max-width: 420px) {
+    .card { padding: 24px 20px; }
+    .footer-links { gap: 12px; }
+  }
+</style>
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="brand-header">
+      <div class="brand-logo"><img src="/cdc-logo.jpg" alt="CDC"></div>
+      <h1 class="brand-title" style="color: whitesmoke; font-family: 'Times New Roman', Times, serif; background-color: rgba(70, 69, 69, 0.267);">BOM TOOL</h1>
+      <p class="brand-sub">Spare Parts Interchangeability Record</p>
+    </div>
+
+    <form id="loginForm" class="card">
+      <h2>Welcome to CDC</h2>
+      <p class="card-sub">Sign in to continue</p>
+
+      <label for="username">Username or Email</label>
+      <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+
+      <label for="password">Password</label>
+      <div class="pw-wrap">
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <button type="button" class="pw-toggle" id="pwToggleBtn" aria-label="Show password">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+
+      <label class="remember-row">
+        <input type="checkbox" id="rememberDevice">
+        Remember this device
+      </label>
+
+      <button type="submit" id="submitBtn">Sign In <span aria-hidden="true">&rarr;</span></button>
+      <div class="error" id="error"></div>
+    </form>
+
+    <form id="firstLoginBox" class="card">
+      <h2>Your new password</h2>
+      <p class="warn">Save this now &mdash; it won't be shown again, and the starter password no longer works for your account.</p>
+      <div id="newPassword"></div>
+      <button type="button" id="continueBtn">I've saved it &mdash; continue</button>
+    </form>
+
+    <div class="footer-links">
+      <span>Privacy Policy</span>
+      <span>Terms of Service</span>
+      <span>Support</span>
+    </div>
+  </div>
+
+  <script>
+    const pwInput = document.getElementById('password');
+    const pwToggleBtn = document.getElementById('pwToggleBtn');
+    pwToggleBtn.addEventListener('click', () => {
+      pwInput.type = pwInput.type === 'password' ? 'text' : 'password';
+    });
+
+    const form = document.getElementById('loginForm');
+    const errorEl = document.getElementById('error');
+    const submitBtn = document.getElementById('submitBtn');
+    const firstLoginBox = document.getElementById('firstLoginBox');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      submitBtn.disabled = true;
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Sign in failed.');
+
+        if (data.first_login && data.new_password) {
+          form.style.display = 'none';
+          document.getElementById('newPassword').textContent = data.new_password;
+          firstLoginBox.style.display = 'block';
+          document.getElementById('continueBtn').addEventListener('click', () => {
+            window.location.href = '/extraction.html';
+          });
+        } else {
+          window.location.href = '/extraction.html';
+        }
+      } catch (err) {
+        errorEl.textContent = err.message;
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

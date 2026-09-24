@@ -1,0 +1,13 @@
+# Keep local data, environments and user lists out of the image.
+venv/
+data/
+**/__pycache__/
+*.pyc
+.claude/
+*.log
+.env
+USERNAME.csv
+*.jpg
+*.png
+!app/static/*.jpg
+!app/static/*.png
