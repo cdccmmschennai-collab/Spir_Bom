@@ -1,0 +1,7 @@
+# Added on the HTTPS server only (see .env.example: COMPOSE_FILE). Opens port
+# 443 so Caddy can serve the site over HTTPS; port 80 (in docker-compose.yml)
+# stays open for the HTTP -> HTTPS redirect and certificate issuing.
+services:
+  caddy:
+    ports:
+      - "443:443"
