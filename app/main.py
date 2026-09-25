@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 import shutil
 import uuid
 import zipfile
@@ -18,6 +19,11 @@ from engine.sap_output import build_sap_output, backfill_part_output_rows
 from engine.combine import consolidate_jobs
 from engine import db
 from engine import auth
+
+# Parser diagnostics (e.g. which sheets were detected as SPIR sheets) go to
+# the server log / `docker compose logs app`, never to the user.
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s %(name)s: %(message)s')
+logging.getLogger('engine').setLevel(logging.INFO)
 
 app = FastAPI(title='BOM Tool')
 db.init_db()
