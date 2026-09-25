@@ -309,17 +309,21 @@
       const entries = Array.from(fileList).map((file, i) =>
         ({ file, el: addRow(`${Date.now()}-${i}-${file.name}`, file.name) }));
       entries.forEach(({ el }) => setProgress(el, 'Waiting to upload...'));
-      for (const { file, el } of entries) {
-        try {
-          const jobId = await uploadSpirFile('/api/process-extraction?source=batch', file,
-                                             text => setProgress(el, text));
-          trackJob(jobId, el);
-        } catch (err) {
-          if (err.name === 'AuthError') return goToLogin();
-          setError(el, err.message);
-          updateClearButton();
+      // The whole batch counts as one upload, so switching pages between two
+      // files can't cancel the files not yet sent.
+      await keepPageAlive(async () => {
+        for (const { file, el } of entries) {
+          try {
+            const jobId = await uploadSpirFile('/api/process-extraction?source=batch', file,
+                                               text => setProgress(el, text));
+            trackJob(jobId, el);
+          } catch (err) {
+            if (err.name === 'AuthError') return goToLogin();
+            setError(el, err.message);
+            updateClearButton();
+          }
         }
-      }
+      });
     }
 
     function trackJob(jobId, el) {

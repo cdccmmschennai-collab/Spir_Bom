@@ -72,12 +72,91 @@ function _postWithProgress(url, form, onPercent) {
 }
 
 
-// While a file is still being sent, leaving the page would cancel the upload
-// (the browser holds the data until then), so ask before leaving. Once it's
-// uploaded the server owns the job and the user can go anywhere.
-let _activeUploads = 0;
-window.addEventListener('beforeunload', e => {
-  if (_activeUploads > 0) { e.preventDefault(); e.returnValue = ''; }
+// ---------------------------------------------------------------------------
+// Moving between the tool's pages while a file is still uploading.
+//
+// Each page is a separate document, so a normal link click unloads the page
+// and the browser cancels any upload still in progress (processing itself is
+// safe: it runs on the server). So while an upload is running, tool links
+// don't unload the page: the target page is shown in a full-window frame on
+// top of it (address bar and Back button updated as usual) while the upload
+// continues underneath. Frames are kept, so going back to a page shows it
+// exactly as it was. With nothing uploading, links navigate normally.
+// ---------------------------------------------------------------------------
+window._bomBusy = 0;   // uploads (or a batch of uploads) in progress in this page
+
+// Runs fn() with this page counted as busy, so it isn't unloaded meanwhile.
+async function keepPageAlive(fn) {
+  window._bomBusy++;
+  try { return await fn(); } finally { window._bomBusy--; }
+}
+
+function _pageKey(url) {
+  const path = new URL(url, location.href).pathname;
+  return path === '/' ? '/extraction.html' : path;
+}
+
+function _anyPageBusy() {
+  const top = window.top;
+  const wins = [top].concat(Array.from(top.document.querySelectorAll('iframe.bom-page'), f => f.contentWindow));
+  return wins.some(w => { try { return (w._bomBusy || 0) > 0; } catch (e) { return false; } });
+}
+
+if (window.top === window) {
+  const homeKey = _pageKey(location.href);
+  const frames = {};   // page path -> iframe
+
+  const show = key => {
+    Object.entries(frames).forEach(([k, f]) => { f.style.display = k === key ? 'block' : 'none'; });
+    if (key === homeKey) {
+      document.title = window._bomHomeTitle || document.title;
+    } else {
+      try { document.title = frames[key].contentDocument.title || document.title; } catch (e) { /* loading */ }
+    }
+  };
+
+  window._bomNavigate = (url, push = true) => {
+    const key = _pageKey(url);
+    if (!Object.keys(frames).length && !_anyPageBusy()) {
+      location.href = url;   // nothing to protect: ordinary navigation
+      return;
+    }
+    if (!_anyPageBusy() && key !== homeKey && !frames[key]) {
+      location.href = url;   // uploads finished: a fresh load is fine again
+      return;
+    }
+    window._bomHomeTitle = window._bomHomeTitle || document.title;
+    if (key !== homeKey && !frames[key]) {
+      const f = document.createElement('iframe');
+      f.className = 'bom-page';
+      f.src = url;
+      f.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483000;' +
+                        'display:none;background:var(--page-bg, #fff);';
+      f.addEventListener('load', () => { if (f.style.display === 'block') show(key); });
+      document.body.appendChild(f);
+      frames[key] = f;
+    }
+    if (push) history.pushState({ bomKey: key }, '', key);
+    show(key);
+  };
+
+  window.addEventListener('popstate', () => {
+    if (Object.keys(frames).length) window._bomNavigate(location.pathname, false);
+  });
+}
+
+// Tool links (sidebar etc.) go through the top page's _bomNavigate; downloads,
+// API links, new-tab and modified clicks are left alone.
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (!a || a.hasAttribute('download') || (a.target && a.target !== '_self')) return;
+  if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const url = new URL(a.href, location.href);
+  if (url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
+  if (url.pathname !== '/' && !url.pathname.endsWith('.html')) return;
+  if (url.pathname === '/login.html' || typeof window.top._bomNavigate !== 'function') return;
+  e.preventDefault();
+  window.top._bomNavigate(url.pathname + url.search);
 });
 
 // Uploads one SPIR to `url` (/api/process or /api/process-extraction; add
@@ -92,20 +171,17 @@ async function uploadSpirFile(url, file, onProgress) {
                     'pictures/objects and unused sheets, save it again and re-upload.');
   }
 
-  report('Uploading... (stay on this page until the upload finishes)');
+  report('Uploading...');
   const form = new FormData();
   form.append('file', file);
   const sizeText = formatSize(file.size / 1048576);
   let res;
-  _activeUploads++;
   try {
-    res = await _postWithProgress(url, form, frac =>
-      report(frac < 1 ? `Uploading ${Math.floor(frac * 100)}% of ${sizeText}... (stay on this page until the upload finishes)`
-                      : 'Upload complete, saving on server...'));
+    res = await keepPageAlive(() => _postWithProgress(url, form, frac =>
+      report(frac < 1 ? `Uploading ${Math.floor(frac * 100)}% of ${sizeText}... (keep this browser tab open)`
+                      : 'Upload complete, saving on server...')));
   } catch (e) {
     throw new Error('Could not reach the server (network problem, or the server is restarting). Please try again.');
-  } finally {
-    _activeUploads--;
   }
   if (res.status === 401) throw new AuthError();
   const job = await readJson(res);
