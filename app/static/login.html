@@ -172,6 +172,7 @@
     </div>
   </div>
 
+  <script src="/api.js"></script>
   <script>
     const pwInput = document.getElementById('password');
     const pwToggleBtn = document.getElementById('pwToggleBtn');
@@ -197,7 +198,7 @@
             password: document.getElementById('password').value,
           }),
         });
-        const data = await res.json().catch(() => ({}));
+        const data = await readJson(res).catch(e => ({ detail: e.message }));
         if (!res.ok) throw new Error(data.detail || 'Sign in failed.');
 
         if (data.first_login && data.new_password) {

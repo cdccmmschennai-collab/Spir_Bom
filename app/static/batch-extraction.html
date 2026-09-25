@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/theme.js"></script>
+<script src="/api.js"></script>
 <link rel="icon" type="image/jpeg" href="/cdc-logo.jpg">
 <title>Batch Extraction &middot; SPIR-BOM Tool</title>
 <style>
@@ -302,14 +303,13 @@
       for (const { key, file, el } of entries) {
         setProcessing(el);
         try {
-          const form = new FormData();
-          form.append('file', file);
-          const res = await fetch('/api/process-extraction', { method: 'POST', body: form });
-          if (res.status === 401) return goToLogin();
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.detail || 'Processing failed');
+          const data = await processSpirFile('/api/process-extraction', file, text => {
+            const state = el.querySelector('.queue-state.processing');
+            if (state) state.innerHTML = `<span class="spinner"></span>${text}`;
+          });
           setDone(el, data);
         } catch (err) {
+          if (err.name === 'AuthError') return goToLogin();
           setError(el, err.message);
         }
       }
@@ -325,7 +325,7 @@
     async function loadUser() {
       const res = await fetch('/api/me');
       if (res.status === 401) return goToLogin();
-      const data = await res.json();
+      const data = await readJson(res);
       document.getElementById('avatarBtn').textContent = initials(data.username);
       document.getElementById('whoName').textContent = data.username;
     }

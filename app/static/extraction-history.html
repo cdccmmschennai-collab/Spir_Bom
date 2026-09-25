@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/theme.js"></script>
+<script src="/api.js"></script>
 <link rel="icon" type="image/jpeg" href="/cdc-logo.jpg">
 <title>History &middot; SPIR-BOM Tool</title>
 <style>
@@ -350,7 +351,7 @@
       const url = '/api/history?limit=200' + (search ? `&search=${encodeURIComponent(search)}` : '');
       const res = await fetch(url);
       if (res.status === 401) return goToLogin();
-      const rows = await res.json();
+      const rows = await readJson(res);
       currentRows = rows;
       selected.clear();
       selectAll.checked = false;
@@ -420,7 +421,7 @@
         });
         if (res.status === 401) return goToLogin();
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
+          const data = await readJson(res).catch(e => ({ detail: e.message }));
           throw new Error(data.detail || 'Combine failed.');
         }
         const blob = await res.blob();
@@ -451,7 +452,7 @@
         });
         if (res.status === 401) return goToLogin();
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
+          const data = await readJson(res).catch(e => ({ detail: e.message }));
           throw new Error(data.detail || 'Delete failed.');
         }
         await loadHistory(searchBox.value);
@@ -471,7 +472,7 @@
     async function loadUser() {
       const res = await fetch('/api/me');
       if (res.status === 401) return goToLogin();
-      const data = await res.json();
+      const data = await readJson(res);
       document.getElementById('avatarBtn').textContent = initials(data.username);
       document.getElementById('whoName').textContent = data.username;
     }

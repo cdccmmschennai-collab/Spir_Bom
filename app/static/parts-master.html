@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/theme.js"></script>
+<script src="/api.js"></script>
 <link rel="icon" type="image/jpeg" href="/cdc-logo.jpg">
 <title>Parts Master &middot; SPIR-BOM Tool</title>
 <style>
@@ -291,7 +292,7 @@
       try {
         const res = await fetch(`/api/parts/search?q=${encodeURIComponent(q)}&field=${field}`);
         if (res.status === 401) return goToLogin();
-        const rows = await res.json();
+        const rows = await readJson(res);
         render(rows);
       } catch (err) {
         results.innerHTML = `<div id="emptyState">Search failed: ${err.message}</div>`;
@@ -373,7 +374,7 @@
     async function loadUser() {
       const res = await fetch('/api/me');
       if (res.status === 401) return goToLogin();
-      const data = await res.json();
+      const data = await readJson(res);
       document.getElementById('avatarBtn').textContent = initials(data.username);
       document.getElementById('whoName').textContent = data.username;
     }

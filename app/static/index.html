@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/theme.js"></script>
+<script src="/api.js"></script>
 <link rel="icon" type="image/jpeg" href="/cdc-logo.jpg">
 <title>SPIR BOM Tool</title>
 <style>
@@ -100,17 +101,14 @@
     function goToLogin() { window.location.href = '/login.html'; }
 
     async function handleFile(file) {
-      status.innerHTML = `<div><span class="spinner"></span> Processing ${file.name}...</div>`;
-      const form = new FormData();
-      form.append('file', file);
+      const show = text =>
+        status.innerHTML = `<div><span class="spinner"></span> ${file.name}: ${text}</div>`;
+      show('Uploading...');
       try {
-        const res = await fetch('/api/process', { method: 'POST', body: form });
-        if (res.status === 401) return goToLogin();
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Processing failed');
-        render(data);
+        render(await processSpirFile('/api/process', file, show));
         loadHistory();
       } catch (err) {
+        if (err.name === 'AuthError') return goToLogin();
         status.innerHTML = `<div class="error">${err.message}</div>`;
       }
     }
@@ -118,7 +116,7 @@
     async function loadUser() {
       const res = await fetch('/api/me');
       if (res.status === 401) return goToLogin();
-      const data = await res.json();
+      const data = await readJson(res);
       document.getElementById('userInfo').innerHTML =
         `Signed in as <b>${data.username}</b><a id="logoutLink">Logout</a>`;
       document.getElementById('logoutLink').addEventListener('click', async () => {
@@ -142,7 +140,7 @@
       const url = '/api/history' + (search ? `?search=${encodeURIComponent(search)}` : '');
       const res = await fetch(url);
       if (res.status === 401) return goToLogin();
-      const rows = await res.json();
+      const rows = await readJson(res);
       const body = document.getElementById('historyBody');
       if (!rows.length) {
         body.innerHTML = '<tr><td colspan="5">No files processed yet.</td></tr>';
