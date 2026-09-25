@@ -20,7 +20,18 @@ ANNEXURE_REVIEW_LOG_PATH = os.path.join(DATA_DIR, 'annexure_lookup_review.log')
 
 
 def _annexure_marker_key(s) -> str:
-    return re.sub(r'[^A-Z0-9]', '', str(s or '').upper())
+    key = re.sub(r'[^A-Z0-9]', '', str(s or '').upper())
+    # 'Refer Anneure 1' must key the same as a sheet titled 'Annexure 1'.
+    return 'ANNEXURE' + key[7:] if key.startswith('ANNEURE') else key
+
+
+def _annexure_label(s) -> str:
+    """Clean display text for an ANNEXURE reference that couldn't be
+    resolved -- 'Refer Anneure 1' -> 'Annexure 1' -- kept as the tag so
+    the column (and the file) is still processed instead of dropped."""
+    text = _ANNEXURE_LEADIN_RE.sub('', str(s or '').strip())
+    text = re.sub(r'^ANNEX?URE\b[\s\-_:.]*', '', text, flags=re.IGNORECASE)
+    return f'Annexure {text}'.strip()
 
 
 _ANNEXURE_LEADIN_RE = re.compile(
@@ -261,6 +272,16 @@ def _resolve_annexure_field(value, tag, field: str, annexure_sheets):
     return rec.get(field) if rec else None
 
 
+def _unresolved_annexure_col(col, raw_tag_str, model, sern, qty_units) -> dict:
+    """Tag column for an ANNEXURE reference whose sheet can't be found:
+    kept as one tag named e.g. 'Annexure 1' rather than dropped, with the
+    column's own model/serial (unless those are references too)."""
+    return {'col': col, 'tag': _annexure_label(raw_tag_str),
+            'model': None if _looks_like_annexure_ref(model) else model,
+            'sern': None if _looks_like_annexure_ref(sern) else sern,
+            'qty_units': qty_units}
+
+
 def _log_annexure_miss(spir_no: str, tag: str):
     os.makedirs(DATA_DIR, exist_ok=True)
     try:
@@ -369,6 +390,7 @@ def _parse_continuation_sheet(ws, annexure_sheets=None):
                                           'sern': serial_val, 'qty_units': 1})
                 else:
                     _log_annexure_miss(spir_no, raw_tag_str)
+                    tag_cols.append(_unresolved_annexure_col(col, raw_tag_str, model, sern, qty_units))
                 continue
 
             expanded_tags = expand_tag(raw_tag_str)
@@ -551,6 +573,8 @@ def _parse_sheet(ws, annexure_sheets=None):
                                           'sern': serial_val, 'qty_units': 1})
                 else:
                     _log_annexure_miss(spir_no, raw_tag_str)
+                    tag_cols.append(_unresolved_annexure_col(col, raw_tag_str, model,
+                                                             sern_from_spir, qty_units))
                 continue
 
             expanded_tags = expand_tag(raw_tag_str)
