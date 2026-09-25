@@ -13,8 +13,9 @@ FALLBACK_RATES = {
 _cache = {}
 
 
-def get_rate_to_qar(currency_code: str) -> float | None:
-    code = (currency_code or '').strip().upper()
+def get_rate_to_qar(currency_code) -> float | None:
+    # The CURRENCY cell can hold a number (e.g. a stray 0), not just text.
+    code = str(currency_code or '').strip().upper()
     if not code:
         return None
     if code == 'QAR':
