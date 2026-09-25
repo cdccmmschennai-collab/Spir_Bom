@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <link rel="icon" type="image/jpeg" href="/cdc-logo.jpg">
 <script src="/theme.js"></script>
+<script src="/api.js"></script>
 <title>Extraction &middot; SPIR-BOM Tool</title>
 <style>
   :root {
@@ -260,16 +261,13 @@
     function goToLogin() { window.location.href = '/login.html'; }
 
     async function handleFile(file) {
-      status.innerHTML = `<div class="file-line"><span class="spinner"></span> Processing ${file.name}...</div>`;
-      const form = new FormData();
-      form.append('file', file);
+      const show = text =>
+        status.innerHTML = `<div class="file-line"><span class="spinner"></span> ${file.name}: ${text}</div>`;
+      show('Uploading...');
       try {
-        const res = await fetch('/api/process-extraction', { method: 'POST', body: form });
-        if (res.status === 401) return goToLogin();
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Processing failed');
-        render(data);
+        render(await processSpirFile('/api/process-extraction', file, show));
       } catch (err) {
+        if (err.name === 'AuthError') return goToLogin();
         status.innerHTML = `<div class="file-line error">${err.message}</div>`;
       }
     }
@@ -326,7 +324,7 @@
     async function loadUser() {
       const res = await fetch('/api/me');
       if (res.status === 401) return goToLogin();
-      const data = await res.json();
+      const data = await readJson(res);
       document.getElementById('avatarBtn').textContent = initials(data.username);
       document.getElementById('whoName').textContent = data.username;
     }

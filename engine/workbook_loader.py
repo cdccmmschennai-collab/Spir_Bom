@@ -27,7 +27,11 @@ def load_workbook(path: str):
             return _from_xls(path)
         if ext == '.xlsb':
             return _from_xlsb(path)
-        return openpyxl.load_workbook(path, data_only=True, keep_vba=ext == '.xlsm')
+        # keep_vba stays off even for .xlsm: macros are never used or run, and
+        # keeping them makes openpyxl hold every unparsed part of the file in
+        # memory -- including embedded attachments, which can be most of a
+        # 1 GB SPIR (measured: 2.1 GB RAM / 33 s with it, 48 MB / 1 s without).
+        return openpyxl.load_workbook(path, data_only=True)
     except Exception as e:
         raise ValueError(f'Could not read this Excel file ({ext}): it may be corrupt, '
                          f'password-protected, or not really a {ext} file. ({e})') from e

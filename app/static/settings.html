@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/theme.js"></script>
+<script src="/api.js"></script>
 <link rel="icon" type="image/jpeg" href="/cdc-logo.jpg">
 <title>Settings &middot; SPIR-BOM Tool</title>
 <style>
@@ -375,7 +376,7 @@
     async function loadUser() {
       const res = await fetch('/api/me');
       if (res.status === 401) return goToLogin();
-      const data = await res.json();
+      const data = await readJson(res);
       document.getElementById('avatarBtn').textContent = initials(data.username);
       document.getElementById('whoName').textContent = data.username;
     }
@@ -383,7 +384,7 @@
     async function loadProfile() {
       const res = await fetch('/api/profile');
       if (res.status === 401) return goToLogin();
-      const p = await res.json();
+      const p = await readJson(res);
       document.getElementById('avatarLargeText').textContent = initials(p.username);
       document.getElementById('profileName').textContent = p.full_name || p.username;
       document.getElementById('fieldUsername').textContent = p.username;
@@ -443,7 +444,7 @@
           body: JSON.stringify({ current_password: current, new_password: next }),
         });
         if (res.status === 401) return goToLogin();
-        const data = await res.json().catch(() => ({}));
+        const data = await readJson(res).catch(e => ({ detail: e.message }));
         if (!res.ok) throw new Error(data.detail || 'Could not update password.');
         pwMsg.textContent = 'Password updated.';
         pwMsg.className = 'form-msg success';
