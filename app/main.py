@@ -232,7 +232,12 @@ def _run_job(job_id, jdir, filename, username, job_type, make_zip):
                  finished_at=time.time())
 
 
-def _submit_upload(file: UploadFile, username: str, job_type: str, make_zip: bool):
+# Which page started a job ('extraction', 'batch', 'main'), so each page can
+# show its own jobs again when the user comes back to it.
+_JOB_SOURCES = ('extraction', 'batch', 'main')
+
+
+def _submit_upload(file: UploadFile, username: str, job_type: str, make_zip: bool, source: str):
     if not file.filename or not file.filename.lower().endswith(SUPPORTED_EXTENSIONS):
         raise HTTPException(400, 'Please upload an Excel SPIR file (.xlsx, .xlsm, .xlsb, .xltx or .xls).')
     filename = os.path.basename(file.filename)
@@ -242,25 +247,55 @@ def _submit_upload(file: UploadFile, username: str, job_type: str, make_zip: boo
         shutil.copyfileobj(file.file, f)
 
     _prune_jobs()
-    _set_job(job_id, status='queued', username=username, filename=filename, queued_at=time.time())
+    _set_job(job_id, status='queued', username=username, filename=filename, source=source,
+             dismissed=False, queued_at=time.time())
     _executor.submit(_run_job, job_id, jdir, filename, username, job_type, make_zip)
     return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 
 
+def _source_param(source, default):
+    return source if source in _JOB_SOURCES else default
+
+
 @app.post('/api/process')
-def process(file: UploadFile = File(...), username: str = Depends(require_login)):
+def process(file: UploadFile = File(...), source: str = Query(None),
+            username: str = Depends(require_login)):
     """The main tool's upload: Extraction + SAP OUTPUT + a results zip."""
-    return _submit_upload(file, username, job_type='full', make_zip=True)
+    return _submit_upload(file, username, job_type='full', make_zip=True,
+                          source=_source_param(source, 'main'))
 
 
 @app.post('/api/process-extraction')
-def process_extraction(file: UploadFile = File(...), username: str = Depends(require_login)):
+def process_extraction(file: UploadFile = File(...), source: str = Query(None),
+                       username: str = Depends(require_login)):
     """The dedicated Extraction page's upload -- builds both the
     Extraction file and the SAP OUTPUT file (same outputs as the main
     tool's /api/process), but is recorded with job_type='extraction' so
     it shows up on the Extraction page's own history view rather than
-    the main tool's."""
-    return _submit_upload(file, username, job_type='extraction', make_zip=False)
+    the main tool's. `source` says which page sent it (extraction/batch)."""
+    return _submit_upload(file, username, job_type='extraction', make_zip=False,
+                          source=_source_param(source, 'extraction'))
+
+
+def _job_view(job_id, job, queued_ahead):
+    """A job as the pages see it. elapsed_seconds is measured on the server,
+    so the timer stays right when the user comes back to the page later."""
+    now = time.time()
+    since = job.get('started_at') or job.get('queued_at') or now
+    out = {'job_id': job_id, 'status': job['status'], 'filename': job.get('filename'),
+           'elapsed_seconds': int((job.get('finished_at') or now) - since)}
+    if job['status'] == 'queued':
+        out['queued_ahead'] = queued_ahead
+    elif job['status'] == 'done':
+        out['result'] = job['result']
+    elif job['status'] == 'error':
+        out['error'] = job['error']
+    return out
+
+
+def _queued_ahead(job):
+    return sum(1 for v in _jobs.values()
+               if v.get('status') == 'queued' and v.get('queued_at', 0) < job.get('queued_at', 0))
 
 
 @app.get('/api/process-status/{job_id}')
@@ -269,19 +304,38 @@ def process_status(job_id: str, username: str = Depends(require_login)):
     result the upload used to return directly) or 'error'."""
     with _jobs_lock:
         job = dict(_jobs.get(job_id) or {})
-        queued_ahead = sum(1 for v in _jobs.values()
-                           if v.get('status') == 'queued' and v.get('queued_at', 0) < job.get('queued_at', 0))
+        ahead = _queued_ahead(job) if job else 0
     if not job:
         raise HTTPException(404, 'This processing job is no longer known to the server '
                                  '(the server may have restarted). Please upload the file again.')
-    out = {'job_id': job_id, 'status': job['status']}
-    if job['status'] == 'queued':
-        out['queued_ahead'] = queued_ahead
-    elif job['status'] == 'done':
-        out['result'] = job['result']
-    elif job['status'] == 'error':
-        out['error'] = job['error']
-    return out
+    return _job_view(job_id, job, ahead)
+
+
+@app.get('/api/my-jobs')
+def my_jobs(source: str = Query(None), username: str = Depends(require_login)):
+    """This user's recent jobs from one page (oldest first), running or
+    finished, that they haven't cleared -- lets the Extraction / Batch
+    pages pick up where they were after the user navigated away."""
+    with _jobs_lock:
+        mine = [(jid, dict(v), _queued_ahead(v)) for jid, v in _jobs.items()
+                if v.get('username') == username and not v.get('dismissed')
+                and (source is None or v.get('source') == source)]
+    mine.sort(key=lambda t: t[1].get('queued_at', 0))
+    return [_job_view(jid, job, ahead) for jid, job, ahead in mine]
+
+
+@app.post('/api/my-jobs/dismiss')
+def dismiss_jobs(body: JobIdsRequest, username: str = Depends(require_login)):
+    """Clears finished jobs from a page's list (they stay in History).
+    Jobs still queued or processing are never cleared."""
+    cleared = 0
+    with _jobs_lock:
+        for jid in body.job_ids:
+            job = _jobs.get(jid)
+            if job and job.get('username') == username and job.get('status') in ('done', 'error'):
+                job['dismissed'] = True
+                cleared += 1
+    return {'cleared': cleared}
 
 
 @app.get('/api/download/{job_id}/{filename}')

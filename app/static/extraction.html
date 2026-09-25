@@ -260,15 +260,57 @@
 
     function goToLogin() { window.location.href = '/login.html'; }
 
+    // The page shows one extraction: the latest one started here. Processing
+    // runs on the server, so leaving the page doesn't stop it; coming back
+    // picks it up again (still running, finished, or failed) via resume().
+    let followedJob = null;
+
+    const showProgress = (name, text) =>
+      status.innerHTML = `<div class="file-line"><span class="spinner"></span> ${name}: ${text}</div>`;
+    const showError = message =>
+      status.innerHTML = `<div class="file-line error">${message}</div>`;
+
     async function handleFile(file) {
-      const show = text =>
-        status.innerHTML = `<div class="file-line"><span class="spinner"></span> ${file.name}: ${text}</div>`;
-      show('Uploading...');
+      followedJob = 'uploading';   // stops any earlier job's updates / resume() from overwriting this
+      showProgress(file.name, 'Uploading...');
       try {
-        render(await processSpirFile('/api/process-extraction', file, show));
+        // A new upload replaces the previous finished result on this page
+        // (it stays available in History).
+        const previous = await listMyJobs('extraction').catch(() => []);
+        dismissJobs(previous.filter(j => j.status === 'done' || j.status === 'error').map(j => j.job_id));
+        const jobId = await uploadSpirFile('/api/process-extraction?source=extraction', file,
+                                           text => showProgress(file.name, text));
+        follow(jobId, file.name);
       } catch (err) {
         if (err.name === 'AuthError') return goToLogin();
-        status.innerHTML = `<div class="file-line error">${err.message}</div>`;
+        showError(err.message);
+      }
+    }
+
+    async function follow(jobId, name) {
+      followedJob = jobId;
+      try {
+        const result = await waitForJob(jobId, text => {
+          if (followedJob === jobId) showProgress(name, text);
+        });
+        if (followedJob === jobId) render(result);
+      } catch (err) {
+        if (err.name === 'AuthError') return goToLogin();
+        if (followedJob === jobId) showError(err.message);
+      }
+    }
+
+    async function resume() {
+      let jobs;
+      try { jobs = await listMyJobs('extraction'); }
+      catch (err) { if (err.name === 'AuthError') goToLogin(); return; }
+      const last = jobs[jobs.length - 1];
+      if (!last || followedJob) return;   // nothing to show, or a new upload already started
+      if (last.status === 'done') render(last.result);
+      else if (last.status === 'error') showError(last.error);
+      else {
+        showProgress(last.filename, jobStatusText(last));
+        follow(last.job_id, last.filename);
       }
     }
 
@@ -343,6 +385,7 @@
     });
 
     loadUser();
+    resume();
   </script>
 </body>
 </html>

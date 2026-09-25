@@ -19,7 +19,11 @@ class AuthError extends Error {
 
 function httpErrorMessage(status) {
   if (status === 413) {
-    return `The file is larger than the server's upload limit (${formatSize(MAX_UPLOAD_MB)}). Open it in Excel, ` +
+    // Refused by the web server in front of the app (nginx's
+    // client_max_body_size), whose limit may be lower than MAX_UPLOAD_MB.
+    return 'The server refused this file because it is larger than the web server allows ' +
+           '(HTTP 413). Ask the administrator to raise the upload limit (nginx ' +
+           `client_max_body_size, expected ${formatSize(MAX_UPLOAD_MB)}), or open the file in Excel, ` +
            'delete embedded pictures/objects and unused sheets, save it again and re-upload.';
   }
   if (status === 502 || status === 503) {
@@ -67,12 +71,20 @@ function _postWithProgress(url, form, onPercent) {
   });
 }
 
-// Uploads one SPIR to `url` (/api/process or /api/process-extraction) and
-// waits for the server's background job to finish. onProgress(text) gets a
-// short status line ("Uploading...", "Processing... 1m 05s") to display.
-// Resolves with the job's result; rejects with a readable Error (or an
-// AuthError when the session has expired).
-async function processSpirFile(url, file, onProgress) {
+
+// While a file is still being sent, leaving the page would cancel the upload
+// (the browser holds the data until then), so ask before leaving. Once it's
+// uploaded the server owns the job and the user can go anywhere.
+let _activeUploads = 0;
+window.addEventListener('beforeunload', e => {
+  if (_activeUploads > 0) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// Uploads one SPIR to `url` (/api/process or /api/process-extraction; add
+// ?source=batch etc. so the page can find its jobs again) and returns the
+// server's job id as soon as the file is saved there. onProgress(text) gets
+// "Uploading 42% of 1.2 GB..." lines.
+async function uploadSpirFile(url, file, onProgress) {
   const report = text => { if (onProgress) onProgress(text); };
   if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
     throw new Error(`${file.name} is ${formatSize(file.size / 1048576)}, larger than the ` +
@@ -80,31 +92,46 @@ async function processSpirFile(url, file, onProgress) {
                     'pictures/objects and unused sheets, save it again and re-upload.');
   }
 
-  report('Uploading...');
+  report('Uploading... (stay on this page until the upload finishes)');
   const form = new FormData();
   form.append('file', file);
   const sizeText = formatSize(file.size / 1048576);
   let res;
+  _activeUploads++;
   try {
     res = await _postWithProgress(url, form, frac =>
-      report(frac < 1 ? `Uploading ${Math.floor(frac * 100)}% of ${sizeText}...`
+      report(frac < 1 ? `Uploading ${Math.floor(frac * 100)}% of ${sizeText}... (stay on this page until the upload finishes)`
                       : 'Upload complete, saving on server...'));
   } catch (e) {
     throw new Error('Could not reach the server (network problem, or the server is restarting). Please try again.');
+  } finally {
+    _activeUploads--;
   }
   if (res.status === 401) throw new AuthError();
   const job = await readJson(res);
   if (!res.ok) throw new Error(job.detail || httpErrorMessage(res.status));
+  return job.job_id;
+}
 
-  // Poll the background job. Brief outages (a proxy error page, a network
-  // blip) are retried; only a definite answer ends the wait.
-  const started = Date.now();
+// One status line for a job as the server reports it (see /api/my-jobs).
+function jobStatusText(st) {
+  const t = formatElapsed((st.elapsed_seconds || 0) * 1000);
+  if (st.status === 'queued') {
+    return `Waiting for ${st.queued_ahead ? st.queued_ahead + ' other file(s)' : 'another file'} to finish... ${t}`;
+  }
+  return `Processing... ${t} (you can leave this page; it keeps running)`;
+}
+
+// Waits for a server job to finish. Resolves with its result, or rejects with
+// a readable Error (an AuthError when the session has expired). Brief outages
+// (a proxy error page, a network blip) are retried.
+async function waitForJob(jobId, onProgress) {
+  const report = text => { if (onProgress) onProgress(text); };
   let failures = 0;
   for (;;) {
-    await _sleep(2000);
     let st;
     try {
-      const r = await fetch(`/api/process-status/${job.job_id}`, { cache: 'no-store' });
+      const r = await fetch(`/api/process-status/${jobId}`, { cache: 'no-store' });
       if (r.status === 401) throw new AuthError();
       st = await readJson(r);
       if (!r.ok) {
@@ -119,13 +146,38 @@ async function processSpirFile(url, file, onProgress) {
         throw new Error('Lost contact with the server while processing. Check the History page ' +
                         'in a few minutes; if the file is not there, upload it again.');
       }
-      report(`Processing... ${formatElapsed(Date.now() - started)} (reconnecting to server)`);
+      report('Processing... (reconnecting to server)');
+      await _sleep(2000);
       continue;
     }
     if (st.status === 'done') return st.result;
     if (st.status === 'error') throw new Error(st.error || 'Processing failed.');
-    report(st.status === 'queued'
-      ? `Waiting for ${st.queued_ahead ? st.queued_ahead + ' other file(s)' : 'another file'} to finish... ${formatElapsed(Date.now() - started)}`
-      : `Processing... ${formatElapsed(Date.now() - started)}`);
+    report(jobStatusText(st));
+    await _sleep(2000);
   }
+}
+
+// Upload + wait, for pages that show one file at a time.
+async function processSpirFile(url, file, onProgress) {
+  return waitForJob(await uploadSpirFile(url, file, onProgress), onProgress);
+}
+
+// This user's running/finished jobs started from one page ('extraction',
+// 'batch', 'main'), oldest first -- so a page can show them again after the
+// user navigated away and came back.
+async function listMyJobs(source) {
+  const r = await fetch(`/api/my-jobs?source=${encodeURIComponent(source)}`, { cache: 'no-store' });
+  if (r.status === 401) throw new AuthError();
+  const data = await readJson(r);
+  if (!r.ok) throw new Error(data.detail || httpErrorMessage(r.status));
+  return data;
+}
+
+// Removes finished jobs from a page's list (they stay in History).
+async function dismissJobs(jobIds) {
+  if (!jobIds.length) return;
+  await fetch('/api/my-jobs/dismiss', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_ids: jobIds }),
+  }).catch(() => {});
 }

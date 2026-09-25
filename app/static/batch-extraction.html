@@ -136,7 +136,13 @@
   #uploadCard p.desc { font-size: 13.5px; color: var(--gray-600); margin: 0 0 4px; }
   #uploadCard p.supports { font-size: 12px; color: var(--gray-400); margin: 0; }
 
-  #queue { width: 700px; max-width: calc(100% - 8px); margin-top: 20px; }
+  #queue { width: 700px; max-width: calc(100% - 8px); }
+  #queueTools { width: 700px; max-width: calc(100% - 8px); margin-top: 20px; display: flex; justify-content: flex-end; }
+  #clearFinished {
+    background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px;
+    font-size: 12.5px; font-weight: 600; color: var(--ink); cursor: pointer;
+  }
+  #clearFinished:hover { background: var(--page-bg); }
   .queue-item {
     background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
     padding: 13px 16px; margin-top: 8px;
@@ -228,6 +234,7 @@
           <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xlsb,.xltx,.xls" multiple>
         </div>
 
+        <div id="queueTools"><button id="clearFinished" type="button" style="display:none">Clear finished</button></div>
         <div id="queue"></div>
       </div>
     </div>
@@ -268,12 +275,16 @@
       return el;
     }
 
-    function setProcessing(el) {
-      el.querySelector('.queue-state').outerHTML =
-        `<span class="queue-state processing"><span class="spinner"></span>Processing</span>`;
+    function setProgress(el, text) {
+      if (!el.querySelector('.queue-state.processing')) {
+        el.querySelector('.queue-state').outerHTML =
+          `<span class="queue-state processing"><span class="spinner"></span><span class="state-text"></span></span>`;
+      }
+      el.querySelector('.queue-state .state-text').textContent = text;
     }
 
     function setDone(el, data) {
+      el.classList.add('finished');
       el.querySelector('.queue-state').outerHTML = `<span class="queue-state done">Done</span>`;
       el.querySelector('.queue-body').innerHTML = `
         <div class="queue-meta">SPIR: <b>${data.spir_no}</b> &middot; Sheets: ${data.sheets.join(', ')} &middot; Tags: ${data.tags.length}</div>
@@ -285,35 +296,67 @@
     }
 
     function setError(el, message) {
+      el.classList.add('finished');
       el.querySelector('.queue-state').outerHTML = `<span class="queue-state error">Failed</span>`;
       el.querySelector('.queue-body').innerHTML = `<div class="queue-error">${message}</div>`;
     }
 
+    // Files are uploaded one after another; each is queued on the server as
+    // soon as it has arrived, and the server processes them one at a time.
+    // After the uploads finish, leaving the page doesn't stop anything:
+    // resume() rebuilds this list from the server when the user comes back.
     async function handleFiles(fileList) {
-      const files = Array.from(fileList);
-      const entries = files.map((file, i) => {
-        const key = `${Date.now()}-${i}-${file.name}`;
-        return { key, file, el: addRow(key, file.name) };
-      });
-
-      // Processed one at a time -- each file is fully independent (its
-      // own job, its own Extraction + OUTPUT files), sequential just
-      // keeps the queue's progress easy to follow and avoids hammering
-      // the server with a large batch all at once.
-      for (const { key, file, el } of entries) {
-        setProcessing(el);
+      const entries = Array.from(fileList).map((file, i) =>
+        ({ file, el: addRow(`${Date.now()}-${i}-${file.name}`, file.name) }));
+      entries.forEach(({ el }) => setProgress(el, 'Waiting to upload...'));
+      for (const { file, el } of entries) {
         try {
-          const data = await processSpirFile('/api/process-extraction', file, text => {
-            const state = el.querySelector('.queue-state.processing');
-            if (state) state.innerHTML = `<span class="spinner"></span>${text}`;
-          });
-          setDone(el, data);
+          const jobId = await uploadSpirFile('/api/process-extraction?source=batch', file,
+                                             text => setProgress(el, text));
+          trackJob(jobId, el);
         } catch (err) {
           if (err.name === 'AuthError') return goToLogin();
           setError(el, err.message);
+          updateClearButton();
         }
       }
     }
+
+    function trackJob(jobId, el) {
+      el.dataset.jobId = jobId;
+      waitForJob(jobId, text => setProgress(el, text))
+        .then(data => setDone(el, data))
+        .catch(err => {
+          if (err.name === 'AuthError') return goToLogin();
+          setError(el, err.message);
+        })
+        .finally(updateClearButton);
+    }
+
+    async function resume() {
+      let jobs;
+      try { jobs = await listMyJobs('batch'); }
+      catch (err) { if (err.name === 'AuthError') goToLogin(); return; }
+      for (const job of jobs) {   // oldest first; addRow() puts each new row on top
+        const el = addRow(job.job_id, job.filename);
+        el.dataset.jobId = job.job_id;
+        if (job.status === 'done') setDone(el, job.result);
+        else if (job.status === 'error') setError(el, job.error);
+        else { setProgress(el, jobStatusText(job)); trackJob(job.job_id, el); }
+      }
+      updateClearButton();
+    }
+
+    const clearBtn = document.getElementById('clearFinished');
+    function updateClearButton() {
+      clearBtn.style.display = queue.querySelector('.queue-item.finished') ? '' : 'none';
+    }
+    clearBtn.addEventListener('click', () => {
+      const done = Array.from(queue.querySelectorAll('.queue-item.finished'));
+      dismissJobs(done.map(el => el.dataset.jobId).filter(Boolean));
+      done.forEach(el => el.remove());
+      updateClearButton();
+    });
 
     function initials(name) {
       const parts = String(name || '').split(/[^a-zA-Z0-9]+/).filter(Boolean);
@@ -344,6 +387,7 @@
     });
 
     loadUser();
+    resume();
   </script>
 </body>
 </html>
