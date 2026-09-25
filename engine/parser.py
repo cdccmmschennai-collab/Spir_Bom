@@ -8,12 +8,17 @@ sheet name list. It auto-detects which tabs are real data pages.
 """
 import re
 import os
+import logging
 import datetime
+
+from openpyxl.utils import get_column_letter
 
 from .rules import expand_tag
 from .db import DATA_DIR
 from .reference_data import find_country_mentions
 from .workbook_loader import load_workbook
+
+logger = logging.getLogger(__name__)
 
 NON_DATA_SHEETS = {'validation lists', 'cover'}
 ANNEXURE_REVIEW_LOG_PATH = os.path.join(DATA_DIR, 'annexure_lookup_review.log')
@@ -21,8 +26,10 @@ ANNEXURE_REVIEW_LOG_PATH = os.path.join(DATA_DIR, 'annexure_lookup_review.log')
 
 def _annexure_marker_key(s) -> str:
     key = re.sub(r'[^A-Z0-9]', '', str(s or '').upper())
-    # 'Refer Anneure 1' must key the same as a sheet titled 'Annexure 1'.
-    return 'ANNEXURE' + key[7:] if key.startswith('ANNEURE') else key
+    # 'Refer Anneure 1' / 'ANNEXURES-1' must key the same as a sheet titled
+    # 'Annexure 1' (misspelling, and plural right before the number).
+    key = re.sub(r'^ANNEX?URE', 'ANNEXURE', key)
+    return re.sub(r'^ANNEXURES(?=\d|$)', 'ANNEXURE', key)
 
 
 def _annexure_label(s) -> str:
@@ -30,7 +37,7 @@ def _annexure_label(s) -> str:
     resolved -- 'Refer Anneure 1' -> 'Annexure 1' -- kept as the tag so
     the column (and the file) is still processed instead of dropped."""
     text = _ANNEXURE_LEADIN_RE.sub('', str(s or '').strip())
-    text = re.sub(r'^ANNEX?URE\b[\s\-_:.]*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^ANNEX?URES?\b[\s\-_:.]*', '', text, flags=re.IGNORECASE)
     return f'Annexure {text}'.strip()
 
 
@@ -49,7 +56,7 @@ def _looks_like_annexure_ref(s) -> bool:
     annexure sheets THIS workbook actually has, so no one naming scheme
     is hard-coded here."""
     text = _ANNEXURE_LEADIN_RE.sub('', str(s or '').strip())
-    return bool(re.match(r'ANNEX?URE\b', text, re.IGNORECASE))
+    return bool(re.match(r'ANNEX?URES?\b', text, re.IGNORECASE))
 
 
 def _resolve_annexure_ref(s, annexure_sheets):
@@ -112,20 +119,242 @@ def _is_annexure_sheet(ws) -> bool:
     return key.startswith('ANNEXURE') or key.startswith('ANNEURE')
 
 
+_SPIR_LABEL_RE = re.compile(r'^(?:\d+\s*)?SPIR\s*(?:NUMBER|NO\.?)\s*:?$', re.IGNORECASE)
+
+
+def _find_spir_number_label(ws):
+    """Main-sheet SPIR number found by its own label rather than by cell
+    position, for template variants whose merged header puts the value in
+    e.g. V1 instead of Y1. The label may carry the form's field number
+    ('25 SPIR NUMBER:') and be spelled 'SPIR NO'. Only the header rows are
+    searched, and the value must sit within 6 columns to the label's right
+    (so the SPIR-type checkboxes in column AB are never picked up).
+    Returns (cell coordinate, value) or None."""
+    for r in range(1, 6):
+        for c in range(1, min(ws.max_column or 1, 40) + 1):
+            v = ws.cell(row=r, column=c).value
+            if isinstance(v, str) and _SPIR_LABEL_RE.match(v.strip()):
+                for cc in range(c + 1, c + 7):
+                    cell = ws.cell(row=r, column=cc)
+                    if cell.value not in (None, '') and str(cell.value).strip():
+                        return cell.coordinate, cell.value
+    return None
+
+
+# ---------------------------------------------------------------------------
+# SPIR form structure. Everything below is located from the form's own
+# labels/headers; the fixed positions of the known QatarEnergy SPIR form
+# (tags C1:F1, model/serial/units rows 4/6/7, item headers in row 6 from
+# column G) are only a fallback for sheets that don't carry those labels.
+# ---------------------------------------------------------------------------
+
+def _norm_label(v) -> str:
+    """Header/label text for matching: upper-case, punctuation -> space,
+    whitespace collapsed ('MFR SER'L NO.' -> 'MFR SER L NO')."""
+    return re.sub(r'\s+', ' ', re.sub(r'[^A-Z0-9]+', ' ', str(v or '').upper())).strip()
+
+
+# Row labels in the tag-label column (column B on the known form).
+_ROW_LABELS = {
+    'tag':    (1, lambda t: t.startswith('EQUIP') or bool(re.search(r'\bTAG\b', t))),
+    'model':  (4, lambda t: t.startswith('MFR TYPE') or 'MODEL' in t),
+    'serial': (6, lambda t: t.startswith('MFR SER') or 'SERIAL' in t),
+    'units':  (7, lambda t: t.startswith('NO OF UNITS') or t.startswith('NUMBER OF UNITS')),
+}
+
+# Item-table columns: field -> (known-form column, header matcher).
+_ITEM_COLUMNS = {
+    'item_no':          (7,  lambda t: t.startswith('ITEM NUMBER') or t in ('ITEM NO', 'ITEM')),
+    'qty_fitted':       (8,  lambda t: 'IDENTICAL PARTS' in t),
+    'desc':             (9,  lambda t: t.startswith('DESCRIPTION')),
+    'dwg_no':           (10, lambda t: t.startswith('DWG') or t.startswith('DRAWING')),
+    'mfr_part_no':      (11, lambda t: re.match(r'(MANUFACTURERS?|MFR S?) PART', t) is not None),
+    'supplier_part_no': (12, lambda t: re.match(r'SUPPLIERS? PART', t) is not None),
+    'material_spec':    (13, lambda t: t.startswith('MATERIAL SPEC')),
+    'supplier_ocm':     (15, lambda t: t.startswith('SUPPLIER OCM')),
+    'currency':         (21, lambda t: t.startswith('CURRENCY')),
+    'unit_price':       (22, lambda t: t.startswith('UNIT PRICE')),
+    'delivery_wks':     (23, lambda t: t.startswith('DELIVERY')),
+    'uom':              (25, lambda t: t.startswith('UNIT OF MEASURE') or t == 'UOM'),
+    'sap_no':           (26, lambda t: t.startswith('SAP NUMBER') or t.startswith('SAP NO')),
+    'classification':   (27, lambda t: t.startswith('CLASSIFICATION')),
+}
+
+
+class SpirLayoutError(ValueError):
+    """The sheet looks like a SPIR form but its structure can't be mapped
+    with confidence -- the file is rejected rather than mis-read."""
+
+
+def _col_letter(c) -> str:
+    return get_column_letter(c)
+
+
+def _find_row_labels(ws):
+    """The tag-label column (B on the form) and the rows of its 'EQUIPMENT
+    TAG No' / 'MFR TYPE OR MODEL' / 'MFR SER'L NO.' / 'No. OF UNITS' labels.
+    A column counts only if it has the tag label plus at least two of the
+    others. Rows not found fall back to the form's 1/4/6/7.
+    Returns (label_col or None, {'tag', 'model', 'serial', 'units'})."""
+    label_col, rows = None, {}
+    for c in range(1, 4):
+        found = {}
+        for r in range(1, 13):
+            t = _norm_label(ws.cell(row=r, column=c).value)
+            for key, (_, match) in _ROW_LABELS.items():
+                if t and key not in found and match(t):
+                    found[key] = r
+        if 'tag' in found and len(found) >= 3:
+            label_col, rows = c, found
+            break
+    for key, (fixed_row, _) in _ROW_LABELS.items():
+        rows.setdefault(key, fixed_row)
+    return label_col, rows
+
+
+def _settle_tag_row(ws, rows: dict, tag_cols) -> None:
+    """The 'EQUIPMENT TAG No' label is a merged cell spanning several rows,
+    and vendors sometimes type the tags on its last line (row 3) rather
+    than its first. If the label's own row has no tags, use the first row
+    below it -- above the MFR TYPE / MODEL row -- that does."""
+    def has_tag(r):
+        return any(str(ws.cell(row=r, column=c).value or '').strip() not in ('-', '') for c in tag_cols)
+    if has_tag(rows['tag']):
+        return
+    for r in range(rows['tag'] + 1, rows['model']):
+        if has_tag(r):
+            rows['tag'] = r
+            return
+
+
+def _find_item_header_row(ws, max_row: int = 15):
+    """The item table's header row: the first row (within the top of the
+    sheet) holding both an ITEM NUMBER and a DESCRIPTION header."""
+    last_col = min(ws.max_column or 1, 60)
+    for r in range(1, max_row + 1):
+        texts = [_norm_label(ws.cell(row=r, column=c).value) for c in range(1, last_col + 1)]
+        if (any(_ITEM_COLUMNS['item_no'][1](t) for t in texts if t)
+                and any(_ITEM_COLUMNS['desc'][1](t) for t in texts if t)):
+            return r
+    return None
+
+
+def _sheet_layout(ws):
+    """Where things are on this main sheet. Returns a dict:
+      tag_cols      -- columns holding one equipment tag each (C..F on the form)
+      rows          -- {'tag', 'model', 'serial', 'units'} row numbers
+      cols          -- {item field: column or None}
+      header_row / first_item_row / source ('headers' or 'fixed')
+    Raises SpirLayoutError when headers are present but ambiguous."""
+    label_col, rows = _find_row_labels(ws)
+    header_row = _find_item_header_row(ws)
+    if header_row is None:
+        # No item headers: the known form's fixed positions (older sheets
+        # identified by their SPIR number in Y1 rely on this).
+        cols = {f: fixed for f, (fixed, _) in _ITEM_COLUMNS.items()}
+        _settle_tag_row(ws, rows, range(3, 7))
+        return {'tag_cols': list(range(3, 7)), 'rows': rows, 'cols': cols,
+                'header_row': None, 'first_item_row': 8, 'source': 'fixed'}
+
+    cols, missing = {}, []
+    last_col = min(ws.max_column or 1, 60)
+    for field, (_, match) in _ITEM_COLUMNS.items():
+        hits = [c for c in range(1, last_col + 1)
+                if (t := _norm_label(ws.cell(row=header_row, column=c).value)) and match(t)]
+        if len(hits) > 1:
+            raise SpirLayoutError(
+                f"Sheet '{ws.title.strip()}': the item table has more than one "
+                f"'{field.replace('_', ' ').upper()}' column (row {header_row}).")
+        cols[field] = hits[0] if hits else None
+        if not hits:
+            missing.append(field)
+    if missing:
+        logger.warning('Sheet %r: item columns not found in header row %d, left blank: %s',
+                       ws.title, header_row, ', '.join(missing))
+
+    # Tag columns sit between the row-label column and the ITEM NUMBER column.
+    first_tag_col = (label_col or 2) + 1
+    tag_cols = list(range(first_tag_col, cols['item_no']))
+    if not tag_cols:
+        raise SpirLayoutError(f"Sheet '{ws.title.strip()}': no equipment tag columns "
+                              f"before the ITEM NUMBER column.")
+    _settle_tag_row(ws, rows, tag_cols)
+
+    # Items start after the header row, skipping the column-number row
+    # ('7, 8, 9, 10A ...') that the form puts right under the headers.
+    first = header_row + 1
+    for _ in range(2):
+        item_v = ws.cell(row=first, column=cols['item_no']).value
+        desc_v = ws.cell(row=first, column=cols['desc']).value
+        if item_v in (None, '') or isinstance(desc_v, (int, float)):
+            first += 1
+    return {'tag_cols': tag_cols, 'rows': rows, 'cols': cols,
+            'header_row': header_row, 'first_item_row': first, 'source': 'headers'}
+
+
+def _has_tag(ws, layout) -> bool:
+    return any(str(ws.cell(row=layout['rows']['tag'], column=c).value or '').strip() not in ('-', '')
+               for c in layout['tag_cols'])
+
+
+def _data_sheet_rejection(ws):
+    """Why `ws` is NOT a SPIR main/data sheet, or None if it is one. A real
+    data page has at least one equipment tag in its tag row and a SPIR
+    number: next to its 'SPIR NUMBER' label, or in Y1 on the known form.
+    A sheet found by label must also carry the main-sheet item table
+    (ITEM NUMBER + DESCRIPTION headers) -- that's what tells it apart from
+    a Continuation sheet, which also carries a SPIR NUMBER label. An
+    ANNEXURE-N-named sheet is always a reference sheet, never a data sheet
+    on its own."""
+    if ws.title.strip().lower() in NON_DATA_SHEETS:
+        return 'supporting sheet (by name)'
+    if _is_annexure_sheet(ws):
+        return 'annexure reference sheet'
+    try:
+        layout = _sheet_layout(ws)
+    except SpirLayoutError as e:
+        if ws['Y1'].value or _find_spir_number_label(ws):
+            raise   # clearly a SPIR main sheet: tell the user what's wrong
+        return str(e)
+    if not _has_tag(ws, layout):
+        return 'no equipment tag in the tag row'
+    if layout['source'] != 'headers' and _find_inline_label(ws, 'SPIR NUMBER', rows=range(1, 6)):
+        # Continuation-sheet structure (inline 'SPIR NUMBER:' label, no item
+        # table) -- even when its tags run on into Y1.
+        return 'continuation sheet (SPIR NUMBER label but no item table)'
+    if ws['Y1'].value:
+        return None
+    if not _find_spir_number_label(ws):
+        return 'no SPIR number (no filled SPIR NUMBER label in rows 1-5, Y1 empty)'
+    if layout['source'] != 'headers':
+        return 'no item table (ITEM NUMBER / DESCRIPTION headers)'
+    return None
+
+
 def _is_data_sheet(ws) -> bool:
-    """A real SPIR data page has a SPIR number in Y1 and at least one tag in
-    C1:F1. An ANNEXURE-N-named sheet is always a reference sheet, never a
-    data sheet on its own."""
-    if ws.title.strip().lower() in NON_DATA_SHEETS or _is_annexure_sheet(ws):
-        return False
-    y1 = ws['Y1'].value
-    if not y1:
-        return False
-    for col in range(3, 7):
-        v = ws.cell(row=1, column=col).value
-        if v and str(v).strip() not in ('-', ''):
-            return True
-    return False
+    return _data_sheet_rejection(ws) is None
+
+
+def _header_value(ws, cell: str, label: str):
+    """A main sheet's header field ('EQUIPMENT', 'MANUFACTURER', ...): the
+    first value right of its label in the header rows (within 6 columns,
+    so the SPIR-type checkboxes in AB are never read), else the known
+    form's fixed cell."""
+    found = _find_inline_label(ws, label, rows=range(1, 6), max_offset=6)
+    if found and found[1] not in (None, ''):
+        return found[1]
+    return ws[cell].value
+
+
+def _contact_block(ws, items_end_row: int):
+    """The vendor contact block: the cell under the 'MANUFACTURERS/SUPPLIERS
+    FOCAL POINT' label below the item table (K32 -> K33 on the known form),
+    else the known form's K33."""
+    for r in range(items_end_row, min(ws.max_row or 1, items_end_row + 15) + 1):
+        for c in range(1, min(ws.max_column or 1, 40) + 1):
+            if _norm_label(ws.cell(row=r, column=c).value).startswith('MANUFACTURERS SUPPLIERS FOCAL'):
+                return ws.cell(row=r + 1, column=c).value
+    return ws['K33'].value
 
 
 _TAG_KEYWORD_RE = re.compile(r'\bTAG\b')
@@ -272,14 +501,22 @@ def _resolve_annexure_field(value, tag, field: str, annexure_sheets):
     return rec.get(field) if rec else None
 
 
-def _unresolved_annexure_col(col, raw_tag_str, model, sern, qty_units) -> dict:
-    """Tag column for an ANNEXURE reference whose sheet can't be found:
-    kept as one tag named e.g. 'Annexure 1' rather than dropped, with the
-    column's own model/serial (unless those are references too)."""
-    return {'col': col, 'tag': _annexure_label(raw_tag_str),
-            'model': None if _looks_like_annexure_ref(model) else model,
-            'sern': None if _looks_like_annexure_ref(sern) else sern,
-            'qty_units': qty_units}
+def _add_unresolved_annexure_col(tag_cols, col, raw_tag_str, model, sern, qty_units):
+    """Tag column for an ANNEXURE reference that yields no real tags (sheet
+    missing, or its tag column only reads e.g. 'NA'): kept as one tag
+    named e.g. 'Annexure 1' rather than dropped, with the column's own
+    model/serial (unless those are references too). When several columns
+    point at the same annexure, they're one tag, so their No. of Units
+    (row 7) add up on its first column."""
+    tag = _annexure_label(raw_tag_str)
+    first = next((tc for tc in tag_cols if tc['tag'] == tag), None)
+    if (first is not None and isinstance(first['qty_units'], (int, float))
+            and isinstance(qty_units, (int, float))):
+        first['qty_units'] += qty_units
+    tag_cols.append({'col': col, 'tag': tag,
+                     'model': None if _looks_like_annexure_ref(model) else model,
+                     'sern': None if _looks_like_annexure_ref(sern) else sern,
+                     'qty_units': qty_units})
 
 
 def _log_annexure_miss(spir_no: str, tag: str):
@@ -365,15 +602,20 @@ def _parse_continuation_sheet(ws, annexure_sheets=None):
     label = _find_inline_label(ws, 'SPIR NUMBER', rows=range(1, 6))
     stop_col = label[0] if label else ws.max_column + 1
     spir_no = label[1] if label else ''
+    # Same row labels as a Main Sheet (column B); the column right after
+    # them (C on the form) holds this sheet's item numbers from row 8.
+    label_col, rows = _find_row_labels(ws)
+    item_col = (label_col or 2) + 1
+    _settle_tag_row(ws, rows, range(item_col, stop_col))
 
     tag_cols = []
-    for col in range(3, stop_col):
-        raw_tag = ws.cell(row=1, column=col).value
+    for col in range(item_col, stop_col):
+        raw_tag = ws.cell(row=rows['tag'], column=col).value
         if raw_tag and str(raw_tag).strip() not in ('-', ''):
             raw_tag_str = str(raw_tag).strip()
-            model = ws.cell(row=4, column=col).value
-            sern = ws.cell(row=6, column=col).value
-            qty_units = ws.cell(row=7, column=col).value
+            model = ws.cell(row=rows['model'], column=col).value
+            sern = ws.cell(row=rows['serial'], column=col).value
+            qty_units = ws.cell(row=rows['units'], column=col).value
 
             if _looks_like_annexure_ref(raw_tag_str):
                 # Recognized as an ANNEXURE reference (however it's
@@ -390,7 +632,7 @@ def _parse_continuation_sheet(ws, annexure_sheets=None):
                                           'sern': serial_val, 'qty_units': 1})
                 else:
                     _log_annexure_miss(spir_no, raw_tag_str)
-                    tag_cols.append(_unresolved_annexure_col(col, raw_tag_str, model, sern, qty_units))
+                    _add_unresolved_annexure_col(tag_cols, col, raw_tag_str, model, sern, qty_units)
                 continue
 
             expanded_tags = expand_tag(raw_tag_str)
@@ -412,7 +654,7 @@ def _parse_continuation_sheet(ws, annexure_sheets=None):
     item_flags = []
     r = 8
     while r <= ws.max_row:
-        item_no = ws.cell(row=r, column=3).value   # C: this sheet's own reference to the Main Sheet's ITEM NUMBER
+        item_no = ws.cell(row=r, column=item_col).value   # C: this sheet's own reference to the Main Sheet's ITEM NUMBER
         if item_no in (None, ''):
             r += 1
             continue
@@ -427,7 +669,9 @@ def _parse_continuation_sheet(ws, annexure_sheets=None):
         tag_qty = {}
         for tc in tag_cols:
             v = ws.cell(row=r, column=tc['col']).value
-            if v not in (None, '-', ''):
+            # Several columns can yield the same tag (e.g. C1:F1 all reading
+            # 'ANNEXURES-1'); flag it once per item, keeping the first qty.
+            if v not in (None, '-', '') and tc['tag'] not in flags:
                 flags.append(tc['tag'])
                 tag_qty[tc['tag']] = v if isinstance(v, (int, float)) else None
         if flags:
@@ -530,25 +774,33 @@ def _split_paired_values(raw, count, try_slash=False):
 
 
 def _parse_sheet(ws, annexure_sheets=None):
-    spir_no = str(ws['Y1'].value or '').strip().lstrip('_').strip()
-    equipment_desc = str(ws['X2'].value or '').strip()
-    manufacturer = str(ws['Y3'].value or '').strip()
-    supplier = str(ws['W4'].value or '').strip()
-    vendor = _parse_vendor_contact(supplier, ws['K33'].value)
+    layout = _sheet_layout(ws)
+    rows, cols = layout['rows'], layout['cols']
+    found = _find_spir_number_label(ws)
+    spir_raw = found[1] if found else ws['Y1'].value
+    logger.info('SPIR sheet %r: layout from %s (item header row %s, tag columns %s); '
+                'SPIR number at %s: %r', ws.title, layout['source'], layout['header_row'],
+                [_col_letter(c) for c in layout['tag_cols']], found[0] if found else 'Y1', spir_raw)
+    spir_no = str(spir_raw or '').strip().lstrip('_').strip()
+    equipment_desc = str(_header_value(ws, 'X2', 'EQUIPMENT') or '').strip()
+    manufacturer = str(_header_value(ws, 'Y3', 'MANUFACTURER') or '').strip()
+    supplier = str(_header_value(ws, 'W4', 'SUPPLIER') or '').strip()
     # Only trust the SPIR type when exactly one checkbox is selected --
-    # 0 or 2+ selected is ambiguous and must not be guessed.
+    # 0 or 2+ selected is ambiguous and must not be guessed. The checkboxes
+    # are form controls whose captions aren't cell text, so their linked
+    # cells (AB2:AB5) are read by position; only a real True counts.
     checked_types = [lbl for k, lbl in SPIR_TYPE_LABELS.items() if ws[k].value is True]
     spir_type = checked_types[0] if len(checked_types) == 1 else ''
     spir_rev = _extract_issue_rev(ws)
 
     tag_cols = []
-    for col in range(3, 7):  # C..F
-        raw_tag = ws.cell(row=1, column=col).value
+    for col in layout['tag_cols']:
+        raw_tag = ws.cell(row=rows['tag'], column=col).value
         if raw_tag and str(raw_tag).strip() not in ('-', ''):
             raw_tag_str = str(raw_tag).strip()
-            model = ws.cell(row=4, column=col).value
-            sern_from_spir = ws.cell(row=6, column=col).value
-            qty_units = ws.cell(row=7, column=col).value
+            model = ws.cell(row=rows['model'], column=col).value
+            sern_from_spir = ws.cell(row=rows['serial'], column=col).value
+            qty_units = ws.cell(row=rows['units'], column=col).value
 
             # A tag cell reading e.g. 'ANNEXURE-1', or phrased as 'Refer
             # Annexure 1' / 'Refer to Annexure-1' / 'ANNEXURE (P1)-1'
@@ -573,8 +825,8 @@ def _parse_sheet(ws, annexure_sheets=None):
                                           'sern': serial_val, 'qty_units': 1})
                 else:
                     _log_annexure_miss(spir_no, raw_tag_str)
-                    tag_cols.append(_unresolved_annexure_col(col, raw_tag_str, model,
-                                                             sern_from_spir, qty_units))
+                    _add_unresolved_annexure_col(tag_cols, col, raw_tag_str, model,
+                                                 sern_from_spir, qty_units)
                 continue
 
             expanded_tags = expand_tag(raw_tag_str)
@@ -602,11 +854,15 @@ def _parse_sheet(ws, annexure_sheets=None):
                 tag_cols.append({'col': col, 'tag': tag, 'model': tag_model,
                                   'sern': sern, 'qty_units': qty_units})
 
+    def cell(r, field):
+        c = cols[field]
+        return ws.cell(row=r, column=c).value if c else None
+
     items = []
-    r = 8
+    r = layout['first_item_row']
     while True:
-        item_no = ws.cell(row=r, column=7).value   # G
-        desc = ws.cell(row=r, column=9).value       # I
+        item_no = cell(r, 'item_no')
+        desc = cell(r, 'desc')
         if item_no is None or desc in (None, ''):
             break
         flags = []
@@ -618,28 +874,32 @@ def _parse_sheet(ws, annexure_sheets=None):
                         # IDENTICAL PARTS FITTED", an equipment-level count).
         for tc in tag_cols:
             v = ws.cell(row=r, column=tc['col']).value
-            if v not in (None, '-', ''):
+            # Several columns can yield the same tag (e.g. C1:F1 all reading
+            # 'ANNEXURES-1'); flag it once per item, keeping the first qty.
+            if v not in (None, '-', '') and tc['tag'] not in flags:
                 flags.append(tc['tag'])
                 tag_qty[tc['tag']] = v if isinstance(v, (int, float)) else None
         items.append({
             'item_no': item_no,
             'desc': desc,
-            'qty_fitted': ws.cell(row=r, column=8).value,   # H: TOTAL NO. OF IDENTICAL PARTS FITTED
-            'dwg_no': ws.cell(row=r, column=10).value,
-            'mfr_part_no': ws.cell(row=r, column=11).value,
-            'supplier_part_no': ws.cell(row=r, column=12).value,
-            'material_spec': ws.cell(row=r, column=13).value,
-            'supplier_ocm': ws.cell(row=r, column=15).value,
-            'currency': ws.cell(row=r, column=21).value,
-            'unit_price': ws.cell(row=r, column=22).value,
-            'delivery_wks': ws.cell(row=r, column=23).value,
-            'uom': ws.cell(row=r, column=25).value,
-            'sap_no': ws.cell(row=r, column=26).value,
-            'classification': ws.cell(row=r, column=27).value,
+            'qty_fitted': cell(r, 'qty_fitted'),   # TOTAL NO. OF IDENTICAL PARTS FITTED
+            'dwg_no': cell(r, 'dwg_no'),
+            'mfr_part_no': cell(r, 'mfr_part_no'),
+            'supplier_part_no': cell(r, 'supplier_part_no'),
+            'material_spec': cell(r, 'material_spec'),
+            'supplier_ocm': cell(r, 'supplier_ocm'),
+            'currency': cell(r, 'currency'),
+            'unit_price': cell(r, 'unit_price'),
+            'delivery_wks': cell(r, 'delivery_wks'),
+            'uom': cell(r, 'uom'),
+            'sap_no': cell(r, 'sap_no'),
+            'classification': cell(r, 'classification'),
             'flags': flags,
             'tag_qty': tag_qty,
         })
         r += 1
+
+    vendor = _parse_vendor_contact(supplier, _contact_block(ws, r))
 
     return {
         'sheet_name': ws.title,
@@ -664,10 +924,20 @@ def parse_spir(path: str) -> dict:
        - spir_no / manufacturer / equipment_desc / spir_type / vendor: from first sheet
     """
     wb = load_workbook(path)   # any supported Excel format, see engine.workbook_loader
-    sheet_names = [ws.title for ws in wb.worksheets if _is_data_sheet(ws)]
+    sheet_names = []
+    for ws in wb.worksheets:
+        reason = _data_sheet_rejection(ws)
+        if reason is None:
+            sheet_names.append(ws.title)
+            logger.info('Detected SPIR sheet: %r', ws.title)
+        else:
+            logger.info('Not a SPIR main sheet: %r (%s)', ws.title, reason)
     if not sheet_names:
-        raise ValueError('No SPIR data sheet found (expected a tab with a SPIR number in Y1 '
-                          'and at least one equipment tag in row 1, columns C:F).')
+        logger.warning('No SPIR main sheet in %s; checked: %s', os.path.basename(path),
+                       '; '.join(f'{ws.title!r}: {_data_sheet_rejection(ws)}' for ws in wb.worksheets))
+        raise ValueError('No SPIR main sheet found. Expected a sheet with a SPIR NUMBER, '
+                          'equipment tags beside the EQUIPMENT TAG No label, and the '
+                          'ITEM NUMBER / DESCRIPTION item table.')
 
     # Every ANNEXURE-N-named sheet is its own reference sheet, keyed by its
     # own normalized title so a tag cell reading 'ANNEXURE-1' resolves to
